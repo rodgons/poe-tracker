@@ -1,0 +1,590 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>PoE Overlay Field Guide</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one reading column (max 780px) with a sticky chapter rail on wide screens; figures break out to full column width. */
+:root{
+  --bg:#f3f5f4; --surface:#ffffff; --sunk:#e8ecea; --fg:#16201d; --muted:#586661; --line:#cfd7d3;
+  --accent:#0e6f66; --accent-soft:#d8ecE8;
+  --ok:#1f7a3d; --ok-soft:#dcefe1; --warn:#96610a; --warn-soft:#f6e9cc; --bad:#a8322b; --bad-soft:#f6dcd9;
+  --code-bg:#12201d; --code-fg:#d9e6e1; --code-dim:#8aa39b; --code-key:#7fd6c8; --code-str:#f0c674;
+  /* the game screenshot mock-ups are a fixed dark scene in both themes */
+  --scene:#161412; --scene-2:#26211c; --scene-line:#4a4036; --scene-fg:#e9dfcf; --scene-dim:#a39581;
+  --rare:#e8d95a; --unique:#d9772e; --magic:#8f9bff; --life:#b3362e; --mana:#2f5fb3;
+  --display:"Bricolage Grotesque","Avenir Next","Segoe UI",sans-serif;
+  --body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0f1514; --surface:#17201e; --sunk:#1e2927; --fg:#e3ebe8; --muted:#97a8a2; --line:#2e3b38;
+  --accent:#5fcfc0; --accent-soft:#173632;
+  --ok:#6fd08a; --ok-soft:#163222; --warn:#e6b450; --warn-soft:#3a2d10; --bad:#f08a80; --bad-soft:#3d1b18;
+  --code-bg:#0a100f; --code-fg:#d9e6e1; --code-dim:#7f978f; --code-key:#7fd6c8; --code-str:#f0c674;
+  color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#0f1514; --surface:#17201e; --sunk:#1e2927; --fg:#e3ebe8; --muted:#97a8a2; --line:#2e3b38;
+  --accent:#5fcfc0; --accent-soft:#173632;
+  --ok:#6fd08a; --ok-soft:#163222; --warn:#e6b450; --warn-soft:#3a2d10; --bad:#f08a80; --bad-soft:#3d1b18;
+  --code-bg:#0a100f; --code-fg:#d9e6e1; --code-dim:#7f978f; --code-key:#7fd6c8; --code-str:#f0c674;
+  color-scheme:dark }
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.6;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));padding-block:32px 80px}
+.page{max-width:1080px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr);gap:32px}
+@media (min-width:1000px){ .page{grid-template-columns:200px minmax(0,780px);gap:56px} }
+main{min-width:0;display:flex;flex-direction:column;gap:56px}
+nav.rail{display:none}
+@media (min-width:1000px){ nav.rail{display:block;position:sticky;top:calc(env(safe-area-inset-top, 0px) + 24px);align-self:start;font-size:13.5px} }
+nav.rail p{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+nav.rail ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;border-left:1px solid var(--line)}
+nav.rail a{display:block;padding:2px 0 2px 12px;color:var(--muted);text-decoration:none}
+nav.rail a:hover{color:var(--accent)}
+a{color:var(--accent)} a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+
+header.top h1{font-family:var(--display);font-weight:700;font-size:clamp(34px,6vw,54px);line-height:1.02;letter-spacing:-.02em;margin:10px 0 14px;text-wrap:balance}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.lede{font-size:19px;color:var(--muted);max-width:62ch;margin:0}
+section{display:flex;flex-direction:column;gap:16px;min-width:0}
+section > *{margin:0}
+h2{font-family:var(--display);font-weight:700;font-size:28px;line-height:1.15;letter-spacing:-.01em;text-wrap:balance;padding-top:8px;border-top:1px solid var(--line)}
+h3{font-family:var(--display);font-weight:500;font-size:20px;line-height:1.25;margin-top:10px}
+p,li{max-width:68ch}
+ul,ol{padding-left:22px;display:flex;flex-direction:column;gap:6px}
+code{font-family:var(--mono);font-size:.88em;background:var(--sunk);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+pre{background:var(--code-bg);color:var(--code-fg);font-family:var(--mono);font-size:13px;line-height:1.55;padding:16px 18px;border-radius:8px;overflow-x:auto;margin:0;tab-size:2}
+pre code{background:none;padding:0;font-size:inherit;color:inherit;overflow-wrap:normal}
+pre .c{color:var(--code-dim)} pre .k{color:var(--code-key)} pre .s{color:var(--code-str)}
+
+.answers{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+.answer{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;display:flex;flex-direction:column;gap:6px}
+.answer b{font-family:var(--display);font-size:18px;line-height:1.25}
+.answer span{color:var(--muted);font-size:14.5px}
+.tag{display:inline-block;font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:999px;white-space:nowrap;align-self:flex-start}
+.tag.ok{background:var(--ok-soft);color:var(--ok)} .tag.warn{background:var(--warn-soft);color:var(--warn)} .tag.bad{background:var(--bad-soft);color:var(--bad)}
+
+figure{margin:0;display:flex;flex-direction:column;gap:8px}
+figure .frame{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;overflow-x:auto}
+figure svg{display:block;width:100%;min-width:560px;height:auto}
+figcaption{font-size:13.5px;color:var(--muted);max-width:70ch}
+svg text{font-family:var(--body)}
+svg .mono{font-family:var(--mono)}
+.t-fg{fill:var(--fg)} .t-mu{fill:var(--muted)} .t-ac{fill:var(--accent)} .t-sc{fill:var(--scene-fg)} .t-sd{fill:var(--scene-dim)}
+
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:640px}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+th{font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500;background:var(--sunk)}
+td.num{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+td code{font-size:12px}
+
+.note{border:1px solid var(--line);background:var(--accent-soft);border-radius:10px;padding:14px 16px}
+.note.warn{background:var(--warn-soft)} .note.bad{background:var(--bad-soft)}
+.note p{margin:0} .note p + p{margin-top:8px}
+.note b:first-child{font-family:var(--display)}
+
+.anatomy{display:flex;flex-wrap:wrap;gap:6px;background:var(--code-bg);padding:14px;border-radius:8px}
+.anatomy div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.anatomy code{background:none;color:var(--code-fg);font-size:13px;padding:0 0 4px;border-bottom:2px solid var(--code-key)}
+.anatomy small{font-size:11.5px;color:var(--code-dim);line-height:1.3;max-width:20ch}
+.anatomy div.hot code{color:var(--code-str);border-color:var(--code-str)}
+
+.steps{counter-reset:s;list-style:none;padding:0;gap:10px}
+.steps li{counter-increment:s;display:grid;grid-template-columns:34px minmax(0,1fr);gap:12px;max-width:none}
+.steps li::before{content:counter(s);font-family:var(--mono);font-size:13px;width:28px;height:28px;border-radius:50%;border:1px solid var(--accent);color:var(--accent);display:grid;place-items:center;margin-top:1px}
+.steps b{font-family:var(--display);font-weight:500;font-size:17px}
+.steps p{margin:2px 0 0;color:var(--muted);font-size:15px}
+.sources{font-size:14px;gap:4px}
+footer{color:var(--muted);font-size:13px}
+</style>
+
+<div class="page">
+<nav class="rail" aria-label="Chapters">
+  <p>Chapters</p>
+  <ol>
+    <li><a href="#answer">Short answer</a></li>
+    <li><a href="#rules">What GGG allows</a></li>
+    <li><a href="#overlay">How an overlay works</a></li>
+    <li><a href="#stack">Picking a stack</a></li>
+    <li><a href="#events">Game events you can read</a></li>
+    <li><a href="#checklist">Auto-checklist design</a></li>
+    <li><a href="#code">Starter code</a></li>
+    <li><a href="#plan">Build order</a></li>
+    <li><a href="#prior">Tools to study</a></li>
+    <li><a href="#sources">Sources</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="top">
+  <span class="eyebrow">Path of Exile 1 · third-party tool research · November 2026</span>
+  <h1>Building an interactive overlay with an automatic checklist</h1>
+  <p class="lede">How overlay apps sit on top of the game, which game events an outside program can legitimately see, and how to turn those events into a checklist that ticks itself. Event formats below were checked against the real <code>Client.txt</code> on this Mac.</p>
+</header>
+
+<section id="answer">
+  <h2>Short answer</h2>
+  <div class="answers">
+    <div class="answer"><span class="tag ok">Yes</span><b>An interactive overlay is very doable</b><span>It is a normal transparent, always-on-top desktop window. It never touches the game process. Awakened PoE Trade and Exile-UI already work this way.</span></div>
+    <div class="answer"><span class="tag ok">Yes, with limits</span><b>You can track events for an auto-checklist</b><span>The game writes a live log file. Zone changes, level-ups, deaths, quest skill points, passive allocations and NPC dialogue all appear in it.</span></div>
+    <div class="answer"><span class="tag warn">Not available</span><b>No kills, loot or quest-state feed</b><span>There is no event for monster kills, item pickups or a quest log. You infer progress from zones, rewards and dialogue, and keep a manual tick as fallback.</span></div>
+  </div>
+  <figure>
+    <div class="frame">
+      <svg viewBox="0 0 720 452" role="img" aria-label="Mock-up of a game screen with a checklist overlay panel on the right side">
+        <rect x="0" y="0" width="720" height="380" rx="6" fill="var(--scene)"/>
+        <!-- abstract terrain -->
+        <path d="M0 250 Q120 200 240 240 T480 220 T720 250 V380 H0 Z" fill="var(--scene-2)"/>
+        <circle cx="330" cy="215" r="9" fill="var(--scene-dim)"/><rect x="324" y="224" width="12" height="22" rx="3" fill="var(--scene-dim)"/>
+        <!-- HUD -->
+        <circle cx="52" cy="330" r="38" fill="var(--life)"/><circle cx="52" cy="330" r="38" fill="none" stroke="var(--scene-line)" stroke-width="4"/>
+        <circle cx="668" cy="330" r="38" fill="var(--mana)"/><circle cx="668" cy="330" r="38" fill="none" stroke="var(--scene-line)" stroke-width="4"/>
+        <g fill="var(--scene-2)" stroke="var(--scene-line)" stroke-width="2">
+          <rect x="250" y="336" width="30" height="30" rx="3"/><rect x="286" y="336" width="30" height="30" rx="3"/><rect x="322" y="336" width="30" height="30" rx="3"/><rect x="358" y="336" width="30" height="30" rx="3"/><rect x="394" y="336" width="30" height="30" rx="3"/><rect x="430" y="336" width="30" height="30" rx="3"/>
+        </g>
+        <text x="16" y="24" font-size="12" class="t-sd">The Coast · area level 2</text>
+        <!-- whole-window dashed outline -->
+        <rect x="6" y="34" width="708" height="290" rx="4" fill="none" stroke="var(--code-key)" stroke-width="1.5" stroke-dasharray="6 5"/>
+        <text x="16" y="52" font-size="12" class="mono" fill="var(--code-key)">overlay window (transparent, mouse passes through)</text>
+        <!-- overlay panel -->
+        <rect x="474" y="66" width="226" height="222" rx="8" fill="var(--scene-2)" stroke="var(--rare)" stroke-width="1.5"/>
+        <text x="488" y="90" font-size="13" font-weight="600" class="t-sc">Act 1 checklist</text>
+        <text x="686" y="90" font-size="11" text-anchor="end" class="mono t-sd">3 / 7</text>
+        <line x1="488" y1="100" x2="686" y2="100" stroke="var(--scene-line)"/>
+        <g font-size="12.5">
+          <g fill="var(--ok)"><rect x="488" y="112" width="13" height="13" rx="2"/><rect x="488" y="136" width="13" height="13" rx="2"/><rect x="488" y="160" width="13" height="13" rx="2"/></g>
+          <g fill="none" stroke="var(--scene)" stroke-width="2"><path d="M491 119l3 3 5-6"/><path d="M491 143l3 3 5-6"/><path d="M491 167l3 3 5-6"/></g>
+          <text x="510" y="123" class="t-sd">Reach Lioneye's Watch</text>
+          <text x="510" y="147" class="t-sd">Enter The Coast</text>
+          <text x="510" y="171" class="t-sd">Reach level 2</text>
+          <rect x="482" y="178" width="210" height="26" rx="4" fill="var(--scene)"/>
+          <rect x="488" y="184" width="13" height="13" rx="2" fill="none" stroke="var(--rare)" stroke-width="1.5"/>
+          <text x="510" y="195" fill="var(--rare)">Enter The Tidal Island</text>
+          <g fill="none" stroke="var(--scene-dim)" stroke-width="1.5"><rect x="488" y="212" width="13" height="13" rx="2"/><rect x="488" y="236" width="13" height="13" rx="2"/><rect x="488" y="260" width="13" height="13" rx="2"/></g>
+          <text x="510" y="223" class="t-sc">Kill Hailrake (manual tick)</text>
+          <text x="510" y="247" class="t-sc">Quest skill point received</text>
+          <text x="510" y="271" class="t-sc">Enter The Mud Flats</text>
+        </g>
+        <!-- callouts -->
+        <g font-size="12.5">
+          <circle cx="16" cy="404" r="6" fill="none" stroke="var(--code-key)" stroke-width="1.5" stroke-dasharray="3 2"/>
+          <text x="30" y="408" class="t-fg">Dashed area: the overlay window covers the game but ignores the mouse, so you play as normal.</text>
+          <rect x="10" y="424" width="12" height="12" rx="2" fill="none" stroke="var(--rare)" stroke-width="1.5"/>
+          <text x="30" y="434" class="t-fg">Panel: the only part that captures clicks. Green ticks came from the log; one step needs a manual tick.</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>Illustration of the target result. This is a drawn mock-up, not a screenshot of an existing tool.</figcaption>
+  </figure>
+</section>
+
+<section id="rules">
+  <h2>What GGG allows</h2>
+  <p>Grinding Gear Games publishes a third-party policy in its developer docs. It does not approve individual tools, and staff on the forum decline to confirm whether any given tool is safe. The policy text is still clear about where the lines are.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th style="width:120px">Status</th><th>What</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td><span class="tag ok">Permitted</span></td><td>A separate program that draws its own window over the game</td><td>Policy: executable apps that run independently from the game are "permitted" though not encouraged.</td></tr>
+      <tr><td><span class="tag ok">Permitted</span></td><td>Reading the game's log file</td><td>Policy says reading log files is okay "as long as the user is aware of what you are doing with that data."</td></tr>
+      <tr><td><span class="tag ok">Permitted</span></td><td>Reading the clipboard after the player presses Ctrl+C on an item</td><td>Built-in game feature. This is how every price checker works.</td></tr>
+      <tr><td><span class="tag warn">Restricted</span></td><td>Sending keystrokes or chat commands to the game</td><td>Only when the player triggers it by hand, and one game action per press. Timers, file-change triggers and screen-reading triggers are not allowed to fire inputs.</td></tr>
+      <tr><td><span class="tag warn">Grey area</span></td><td>Looking at screen pixels or OCR to update your own UI</td><td>Not named in the policy. Exile-UI does it only to detect open panels and says it avoids reading game values or bars. Never use it to trigger input.</td></tr>
+      <tr><td><span class="tag bad">Forbidden</span></td><td>Reading game memory, injecting code, hooking the renderer, editing game files, packet sniffing</td><td>Apps that interact with the game or its files break Terms of Use 7b, 7c and 7i. Policy: this "will result in immediate account termination."</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="note">
+    <p><b>What this means for an auto-checklist.</b> A checklist that reads the log and updates its own window sends nothing to the game, so the macro rules never come into play. That is my reading of the policy, not a ruling from GGG. The one thing to avoid is letting a log event fire a keystroke or chat command automatically: the policy names file-change reactions as a banned trigger.</p>
+  </div>
+</section>
+
+<section id="overlay">
+  <h2>How an overlay works</h2>
+  <p>There is no special game API involved. The overlay is a second window owned by your app, placed exactly over the game window, with a transparent background and a flag that keeps it above other windows.</p>
+  <figure>
+    <div class="frame">
+      <svg viewBox="0 0 720 300" role="img" aria-label="Side view of window layers showing one click passing through the overlay to the game and another click stopping on the overlay panel">
+        <defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--fg)"/></marker></defs>
+        <text x="20" y="28" font-size="12" class="mono t-mu">SIDE VIEW · top of the stack is nearest to you</text>
+        <!-- overlay layer -->
+        <rect x="170" y="110" width="520" height="16" rx="3" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="6 5"/>
+        <rect x="500" y="104" width="150" height="28" rx="4" fill="var(--accent)"/>
+        <text x="20" y="116" font-size="13.5" font-weight="600" class="t-fg">Overlay window</text>
+        <text x="20" y="134" font-size="12" class="t-mu">transparent · always on top</text>
+        <text x="575" y="96" font-size="12" text-anchor="middle" class="t-ac">checklist panel</text>
+        <!-- game layer -->
+        <rect x="170" y="210" width="520" height="30" rx="3" fill="var(--sunk)" stroke="var(--line)" stroke-width="1.5"/>
+        <text x="20" y="222" font-size="13.5" font-weight="600" class="t-fg">Game window</text>
+        <text x="20" y="240" font-size="12" class="t-mu">Windowed Fullscreen</text>
+        <text x="430" y="230" font-size="12" text-anchor="middle" class="t-mu">Path of Exile</text>
+        <!-- click A -->
+        <line x1="300" y1="50" x2="300" y2="204" stroke="var(--fg)" stroke-width="1.5" marker-end="url(#ah)"/>
+        <text x="310" y="64" font-size="12.5" class="t-fg">Click A: empty area</text>
+        <text x="310" y="190" font-size="12" class="t-mu">passes through, game receives it</text>
+        <!-- click B -->
+        <line x1="575" y1="50" x2="575" y2="80" stroke="var(--fg)" stroke-width="1.5"/>
+        <line x1="575" y1="134" x2="575" y2="134" stroke="var(--fg)"/>
+        <text x="585" y="64" font-size="12.5" class="t-fg">Click B: on panel</text>
+        <text x="575" y="152" font-size="12" text-anchor="middle" class="t-mu">stops here, overlay handles it</text>
+        <text x="170" y="276" font-size="12" class="t-mu">The overlay flips between the two modes as the pointer enters and leaves the panel.</text>
+      </svg>
+    </div>
+    <figcaption>Click-through is a per-window switch. You turn mouse capture on only while the pointer is over your panel.</figcaption>
+  </figure>
+
+  <h3>The four things every overlay has to get right</h3>
+  <ol>
+    <li><b>Display mode.</b> The game must run in Windowed Fullscreen or Windowed. Exclusive Fullscreen can cover every desktop window, including always-on-top ones. Awakened PoE Trade states the same requirement.</li>
+    <li><b>Click-through.</b> The window ignores the mouse by default and re-enables it when the pointer is over an interactive element. In Electron this is <code>setIgnoreMouseEvents(true, { forward: true })</code>, where <code>forward</code> keeps hover events flowing so you can detect the pointer entering the panel.</li>
+    <li><b>Focus.</b> Clicking the panel must not pull keyboard focus away from the game, or your character stops responding until you click back. Use a non-activating window (<code>focusable: false</code>, or a panel-type window on macOS). Only take focus when the player needs to type into the overlay, then hand it back.</li>
+    <li><b>Following the game.</b> Show the overlay only while the game is the foreground window, and match its position and size. Hide it when the player alt-tabs. The <code>electron-overlay-window</code> library does this by finding the game window by title.</li>
+  </ol>
+
+  <h3>Platform notes</h3>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th style="width:110px">Platform</th><th>Overlay window</th><th>Things that bite</th></tr></thead>
+    <tbody>
+      <tr><td>Windows</td><td>Layered, topmost window with the transparent and no-activate extended styles. Best supported by every framework.</td><td>If the game runs as Administrator, the overlay must too, or it cannot track the game window.</td></tr>
+      <tr><td>macOS</td><td>A floating panel raised above normal windows and allowed to join all Spaces, including full-screen ones. In Electron: <code>setAlwaysOnTop(true, 'screen-saver')</code> plus <code>setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })</code>.</td><td>Native full-screen puts the game in its own Space, so the overlay must be allowed to appear there. Tracking another app's window and global hotkeys need the Accessibility permission. Unsigned apps trigger a Gatekeeper warning.</td></tr>
+      <tr><td>Linux</td><td>X11 works with a compositor. Wayland restricts positioning over other apps' windows.</td><td>Needs compositing for transparency. Some setups show a black overlay without it.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="note warn"><p><b>macOS behaviour is version-sensitive.</b> The window-level and Spaces settings above come from community write-ups rather than one official recipe, and they have shifted between Electron and macOS releases. Treat them as the starting point and test on your machine first. A working reference exists: Awakened PoE Trade ships a universal macOS build, and <code>electron-overlay-window</code> has a macOS backend in its source even though its README lists only Windows and Linux.</p></div>
+</section>
+
+<section id="stack">
+  <h2>Picking a stack</h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th style="width:150px">Option</th><th>Good for</th><th>Trade-off</th><th style="width:150px">Proven by</th></tr></thead>
+    <tbody>
+      <tr><td><b>Electron + TypeScript</b></td><td>Fastest route to a polished, interactive UI on Windows, macOS and Linux. Ready-made overlay library.</td><td>Roughly 150–300 MB of memory. Large download.</td><td>Awakened PoE Trade, PoE Overlay</td></tr>
+      <tr><td><b>Tauri (Rust + web UI)</b></td><td>Same web UI, much smaller and lighter.</td><td>You write the game-window tracking yourself per platform. Transparent click-through needs more native work.</td><td>Newer community overlays</td></tr>
+      <tr><td><b>AutoHotkey</b></td><td>Tiny scripts, very quick hotkey and overlay prototypes.</td><td>Windows only. UI is drawn by hand with GDI+.</td><td>Exile-UI (Lailloken)</td></tr>
+      <tr><td><b>Native (Swift / C# WPF)</b></td><td>Lowest overhead and full control over window behaviour.</td><td>One codebase per platform.</td><td>Sidekick (C#)</td></tr>
+      <tr><td><b>Overwolf</b></td><td>Handles in-game rendering and distribution for you.</td><td>Windows only, ad-supported platform, their store rules.</td><td>PoE Overlay II</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p><b>Recommendation: Electron with TypeScript.</b> You are on a Mac with the Steam client installed, and Electron is the only option here with an open-source PoE overlay already running on macOS that you can read and copy patterns from. If memory use becomes a concern later, the parser and checklist engine are plain TypeScript and move to Tauri unchanged.</p>
+</section>
+
+<section id="events">
+  <h2>Game events you can read</h2>
+  <p>Four sources are available to an outside program. Only the first gives you a live event stream.</p>
+  <figure>
+    <div class="frame">
+      <svg viewBox="0 0 720 250" role="img" aria-label="Data flow from Client.txt through a tailer, parser and rule engine into checklist state and the overlay UI, with clipboard, web API and manual input as side inputs">
+        <defs><marker id="ah2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--muted)"/></marker></defs>
+        <g font-size="12.5" text-anchor="middle">
+          <g fill="var(--sunk)" stroke="var(--line)" stroke-width="1.5">
+            <rect x="8" y="30" width="100" height="56" rx="6"/><rect x="128" y="30" width="100" height="56" rx="6"/><rect x="248" y="30" width="100" height="56" rx="6"/>
+            <rect x="488" y="30" width="100" height="56" rx="6"/><rect x="608" y="30" width="104" height="56" rx="6"/>
+            <rect x="248" y="170" width="100" height="56" rx="6"/><rect x="368" y="170" width="100" height="56" rx="6"/><rect x="488" y="170" width="100" height="56" rx="6"/>
+          </g>
+          <rect x="368" y="30" width="100" height="56" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.5"/>
+          <text x="58" y="54" font-weight="600" class="t-fg">Client.txt</text><text x="58" y="72" font-size="11" class="t-mu">game appends</text>
+          <text x="178" y="54" font-weight="600" class="t-fg">Tailer</text><text x="178" y="72" font-size="11" class="t-mu">reads new bytes</text>
+          <text x="298" y="54" font-weight="600" class="t-fg">Parser</text><text x="298" y="72" font-size="11" class="t-mu">line → event</text>
+          <text x="418" y="54" font-weight="600" class="t-fg">Rule engine</text><text x="418" y="72" font-size="11" class="t-mu">event → step</text>
+          <text x="538" y="54" font-weight="600" class="t-fg">Checklist</text><text x="538" y="72" font-size="11" class="t-mu">saved state</text>
+          <text x="660" y="54" font-weight="600" class="t-fg">Overlay UI</text><text x="660" y="72" font-size="11" class="t-mu">renders steps</text>
+          <text x="298" y="194" font-weight="600" class="t-fg">Clipboard</text><text x="298" y="212" font-size="11" class="t-mu">Ctrl+C item text</text>
+          <text x="418" y="194" font-weight="600" class="t-fg">Web API</text><text x="418" y="212" font-size="11" class="t-mu">character snapshot</text>
+          <text x="538" y="194" font-weight="600" class="t-fg">Player</text><text x="538" y="212" font-size="11" class="t-mu">click or hotkey</text>
+        </g>
+        <g stroke="var(--muted)" stroke-width="1.5" fill="none" marker-end="url(#ah2)">
+          <path d="M108 58H124"/><path d="M228 58H244"/><path d="M348 58H364"/><path d="M468 58H484"/><path d="M588 58H604"/>
+          <path d="M298 170V130H400V90"/><path d="M418 170V90"/><path d="M538 170V90"/>
+        </g>
+        <text x="8" y="130" font-size="12" class="mono t-mu">LIVE STREAM ↑</text>
+        <text x="8" y="202" font-size="12" class="mono t-mu">ON DEMAND →</text>
+      </svg>
+    </div>
+    <figcaption>The log is the only push source. Clipboard and the web API are pulled when needed, and the player can always override a step by hand.</figcaption>
+  </figure>
+
+  <h3>Source 1: the Client.txt log</h3>
+  <p>The game appends a line to this file as things happen. Location:</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th style="width:170px">Install</th><th>Path</th></tr></thead>
+    <tbody>
+      <tr><td>macOS (found on this Mac)</td><td><code>~/Library/Application Support/Path of Exile/Cache/Logs/Client.txt</code></td></tr>
+      <tr><td>Windows, Steam</td><td><code>C:\Program Files (x86)\Steam\steamapps\common\Path of Exile\logs\Client.txt</code></td></tr>
+      <tr><td>Windows, standalone</td><td><code>C:\Program Files (x86)\Grinding Gear Games\Path of Exile\logs\Client.txt</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Every regular line has the same shape. The last field is the message, and it is the only part your parser cares about:</p>
+  <div class="anatomy" aria-label="Anatomy of a log line">
+    <div><code>2026/11/10 12:06:02</code><small>local date and time</small></div>
+    <div><code>3336199872</code><small>milliseconds counter</small></div>
+    <div><code>e63da844</code><small>source id (hex)</small></div>
+    <div><code>[INFO Client 54611]</code><small>level and process id</small></div>
+    <div class="hot"><code>: You have entered City Square.</code><small>message. A leading colon marks a system chat line</small></div>
+  </div>
+
+  <p>The table lists what I found in your log: 163,140 lines covering 22 July to 10 November 2026. The counts show how often each pattern matched when I ran the regular expressions from the starter code against the file.</p>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>Event</th><th>Message as written</th><th style="width:70px">Matches</th><th>Checklist use</th></tr></thead>
+    <tbody>
+      <tr><td>Area generated</td><td><code>Generating level 10 area "1_1_8" with seed 895163853</code></td><td class="num">4,239</td><td>Best zone signal. Gives the internal area id and area level about a second before you load in.</td></tr>
+      <tr><td>Area entered</td><td><code>: You have entered The Coast.</code></td><td class="num">4,237</td><td>Display name. Ambiguous on its own, since some names repeat across acts.</td></tr>
+      <tr><td>Level up</td><td><code>: YourChar (Inquisitor) is now level 80</code></td><td class="num">396</td><td>Level goals. Also reveals character name and current class or ascendancy.</td></tr>
+      <tr><td>Death</td><td><code>: YourChar has been slain.</code></td><td class="num">1,280</td><td>Death counter, hardcore warnings.</td></tr>
+      <tr><td>Skill point reward</td><td><code>: You have received a Passive Skill Point.</code></td><td class="num">114</td><td>Confirms a quest hand-in that grants a point. Does not say which quest.</td></tr>
+      <tr><td>Other point rewards</td><td><code>: You have received 2 Passive Respec Points.</code><br><code>: You have received an Atlas Skill Point.</code></td><td class="num">655</td><td>Respec rewards and atlas progress.</td></tr>
+      <tr><td>Quest point list</td><td><code>: 22 Passive Skill Points from quests:</code><br><code>: (1 from The Marooned Mariner)</code></td><td class="num">335</td><td>Printed when the player types <code>/passives</code>. Names every quest already rewarded, so it works as a full resync.</td></tr>
+      <tr><td>Passive allocated</td><td><code>Successfully allocated passive skill id: life_regeneration1087, name: Life Regeneration</code></td><td class="num">2,505</td><td>Tick off a planned passive tree node by node. An <code>unallocated</code> variant exists too.</td></tr>
+      <tr><td>Act boss milestone</td><td><code>: You have been permanently weakened by Kitava's cruel affliction. …</code></td><td class="num">10</td><td>Reliable marker for finishing act 5 (cruel) and act 10 (merciless).</td></tr>
+      <tr><td>NPC dialogue</td><td><code>Einhar, Beastmaster: Exile! You are a welcome omen.</code><br><code>Izaro: Your destination is more dangerous …</code></td><td class="num">many</td><td>Encounter cues: league masters, Izaro in the Labyrinth, Maven, Searing Exarch. Match against a list of known speaker names.</td></tr>
+      <tr><td>Trade result</td><td><code>: Trade accepted.</code> / <code>: Trade cancelled.</code></td><td class="num">249</td><td>Trade steps.</td></tr>
+      <tr><td>Monsters remaining</td><td><code>: 2 monsters remain.</code></td><td class="num">31</td><td>Printed when the player types <code>/remaining</code>.</td></tr>
+      <tr><td>Loading time</td><td><code>[LOADING SCREEN] (City Square) Duration = 1.96797 seconds</code></td><td class="num">4,225</td><td>Marks the moment the zone is playable. Handy for timers.</td></tr>
+      <tr><td>Whisper, player joined</td><td><code>@From &lt;player&gt;: …</code><br><code>: &lt;player&gt; has joined the area.</code></td><td class="num">few</td><td>Trade and party helpers.</td></tr>
+      <tr><td>Client started</td><td><code>***** LOG FILE (id …) OPENING *****</code></td><td class="num">n/a</td><td>New game session. This line has no bracketed header.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Area ids are the key to campaign tracking</h3>
+  <p>The id inside <code>Generating level … area "…"</code> is unique per zone, unlike the display name. Campaign ids follow <code>part_act_zone</code>: part 1 is acts 1 to 5, part 2 is acts 6 to 10. I paired each id with the name that followed it in your log and found 152 distinct campaign ids. Act 1 as an example:</p>
+  <div class="tablewrap">
+  <table style="min-width:520px">
+    <thead><tr><th>Id</th><th>Zone</th><th>Id</th><th>Zone</th></tr></thead>
+    <tbody>
+      <tr><td><code>1_1_1</code></td><td>The Twilight Strand</td><td><code>1_1_6</code></td><td>The Climb</td></tr>
+      <tr><td><code>1_1_town</code></td><td>Lioneye's Watch</td><td><code>1_1_7_1</code></td><td>The Lower Prison</td></tr>
+      <tr><td><code>1_1_2</code></td><td>The Coast</td><td><code>1_1_7_2</code></td><td>The Upper Prison</td></tr>
+      <tr><td><code>1_1_2a</code></td><td>The Tidal Island</td><td><code>1_1_8</code></td><td>Prisoner's Gate</td></tr>
+      <tr><td><code>1_1_3</code></td><td>The Mud Flats</td><td><code>1_1_9</code></td><td>The Ship Graveyard</td></tr>
+      <tr><td><code>1_1_4_1</code></td><td>The Submerged Passage</td><td><code>1_1_9a</code></td><td>The Ship Graveyard Cave</td></tr>
+      <tr><td><code>1_1_4_0</code></td><td>The Flooded Depths</td><td><code>1_1_11_1</code></td><td>The Cavern of Wrath</td></tr>
+      <tr><td><code>1_1_5</code></td><td>The Ledge</td><td><code>1_1_11_2</code></td><td>The Cavern of Anger</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Other ids seen: <code>2_9_1</code> (act 9), <code>2_11_endgame_town</code> (Karui Shores), <code>HideoutSpace</code> (a hideout), and <code>MapWorlds…</code> for maps, such as <code>MapWorldsCitySquare</code>. The open-source <code>exile-leveling</code> project (MIT) carries the full area and quest data extracted from the game files if you want the complete table without playing through it.</p>
+
+  <h3>Source 2: clipboard</h3>
+  <p>Pressing Ctrl+C over an item copies its full text description to the clipboard, and Ctrl+Alt+C copies an extended version. Your app can watch the clipboard and parse that text. Useful for "pick up a 4-link" or "find boots with movement speed" checklist items that the player confirms by hovering and pressing a key.</p>
+
+  <h3>Source 3: official web API</h3>
+  <p>GGG's OAuth API returns account data on request: characters with their equipment and passives (<code>account:characters</code>), stash tabs (<code>account:stashes</code>), atlas passives (<code>account:league_accounts</code>). A desktop app counts as a public client: Authorization Code with PKCE, a local redirect such as <code>http://127.0.0.1:8080/callback</code>, 10-hour access tokens, and rate limits shared across all public clients.</p>
+  <div class="note warn"><p><b>Registration is closed right now.</b> The developer docs currently say GGG is "unable to process new applications." Plan the first version without the API. It is a snapshot source anyway, with no quest state and no push events, so the checklist does not depend on it.</p></div>
+
+  <h3>Source 4: looking at the screen</h3>
+  <p>Screen capture with pixel checks or OCR can tell you that the inventory is open or which tooltip is showing. It is fragile across resolutions and UI scale, costs CPU, sits in the grey area of the policy, and on macOS needs the Screen Recording permission. Leave it out until the log proves insufficient for a specific feature.</p>
+
+  <h3>What you cannot detect</h3>
+  <ul>
+    <li><b>Monster and boss kills.</b> Nothing is logged. Use the next zone, a reward line, or boss dialogue as a stand-in.</li>
+    <li><b>Item pickups and drops.</b> Not logged. Clipboard on demand is the only route.</li>
+    <li><b>Quest state.</b> No quest log is exposed. Skill point lines and <code>/passives</code> cover the quests that grant points. Others need zone inference or a manual tick.</li>
+    <li><b>Waypoints, gems socketed, flasks used, current life.</b> Not logged, and reading them from memory is the forbidden path.</li>
+    <li><b>Which character is logged in.</b> The log does not announce it at login. You learn the name from the first level-up or death line, or you ask the player to pick.</li>
+  </ul>
+</section>
+
+<section id="checklist">
+  <h2>Auto-checklist design</h2>
+  <p>Model each step as text plus a completion condition. The engine holds a pointer to the current step and compares every incoming event with the conditions of the next few open steps.</p>
+  <pre><code><span class="c">// one act of a campaign checklist</span>
+[
+  { <span class="k">"id"</span>: <span class="s">"a1-town"</span>,   <span class="k">"text"</span>: <span class="s">"Reach Lioneye's Watch"</span>,   <span class="k">"when"</span>: { <span class="k">"type"</span>: <span class="s">"area"</span>,  <span class="k">"id"</span>: <span class="s">"1_1_town"</span> } },
+  { <span class="k">"id"</span>: <span class="s">"a1-coast"</span>,  <span class="k">"text"</span>: <span class="s">"Enter The Coast"</span>,         <span class="k">"when"</span>: { <span class="k">"type"</span>: <span class="s">"area"</span>,  <span class="k">"id"</span>: <span class="s">"1_1_2"</span> } },
+  { <span class="k">"id"</span>: <span class="s">"a1-lvl2"</span>,   <span class="k">"text"</span>: <span class="s">"Reach level 2"</span>,           <span class="k">"when"</span>: { <span class="k">"type"</span>: <span class="s">"level"</span>, <span class="k">"min"</span>: 2 } },
+  { <span class="k">"id"</span>: <span class="s">"a1-island"</span>, <span class="k">"text"</span>: <span class="s">"Enter The Tidal Island"</span>,  <span class="k">"when"</span>: { <span class="k">"type"</span>: <span class="s">"area"</span>,  <span class="k">"id"</span>: <span class="s">"1_1_2a"</span> } },
+  { <span class="k">"id"</span>: <span class="s">"a1-hail"</span>,   <span class="k">"text"</span>: <span class="s">"Kill Hailrake"</span>,           <span class="k">"when"</span>: { <span class="k">"type"</span>: <span class="s">"manual"</span> } },
+  { <span class="k">"id"</span>: <span class="s">"a1-point"</span>,  <span class="k">"text"</span>: <span class="s">"Hand in to Bestel for the skill point"</span>,
+                       <span class="k">"when"</span>: { <span class="k">"type"</span>: <span class="s">"points"</span>, <span class="k">"kind"</span>: <span class="s">"Passive Skill"</span> } },
+  { <span class="k">"id"</span>: <span class="s">"a1-mud"</span>,    <span class="k">"text"</span>: <span class="s">"Enter The Mud Flats"</span>,     <span class="k">"when"</span>: { <span class="k">"type"</span>: <span class="s">"area"</span>,  <span class="k">"id"</span>: <span class="s">"1_1_3"</span> } }
+]</code></pre>
+  <figure>
+    <div class="frame">
+      <svg viewBox="0 0 720 210" role="img" aria-label="Timeline showing three log events each ticking a checklist step, and a later zone event ticking the skipped manual step by inference">
+        <text x="12" y="24" font-size="12" class="mono t-mu">LOG EVENTS OVER TIME →</text>
+        <line x1="12" y1="74" x2="708" y2="74" stroke="var(--line)" stroke-width="2"/>
+        <g font-size="11.5" text-anchor="middle">
+          <g fill="var(--accent)"><circle cx="90" cy="74" r="6"/><circle cx="260" cy="74" r="6"/><circle cx="430" cy="74" r="6"/><circle cx="610" cy="74" r="6"/></g>
+          <text x="90" y="54" class="mono t-fg">area "1_1_2"</text>
+          <text x="260" y="54" class="mono t-fg">is now level 2</text>
+          <text x="430" y="54" class="mono t-fg">area "1_1_2a"</text>
+          <text x="610" y="54" class="mono t-fg">area "1_1_3"</text>
+          <g stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="3 3"><path d="M90 82V120"/><path d="M260 82V120"/><path d="M430 82V120"/><path d="M610 82V120"/><path d="M610 100H520V160"/></g>
+          <g fill="var(--ok-soft)" stroke="var(--ok)" stroke-width="1.5">
+            <rect x="25" y="120" width="130" height="30" rx="5"/><rect x="195" y="120" width="130" height="30" rx="5"/><rect x="365" y="120" width="130" height="30" rx="5"/><rect x="545" y="120" width="130" height="30" rx="5"/>
+          </g>
+          <rect x="455" y="160" width="130" height="30" rx="5" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.5"/>
+          <text x="90" y="140" class="t-fg">✓ Enter The Coast</text>
+          <text x="260" y="140" class="t-fg">✓ Reach level 2</text>
+          <text x="430" y="140" class="t-fg">✓ Enter Tidal Island</text>
+          <text x="610" y="140" class="t-fg">✓ Enter Mud Flats</text>
+          <text x="520" y="180" class="t-fg">✓ earlier steps, inferred</text>
+        </g>
+        <text x="12" y="180" font-size="12" class="t-mu">Reaching a later zone closes skipped steps before it,</text>
+        <text x="12" y="197" font-size="12" class="t-mu">marked as inferred so the player can reopen them.</text>
+      </svg>
+    </div>
+    <figcaption>Three events tick three steps directly. A later zone event also closes the manual step before it by inference.</figcaption>
+  </figure>
+
+  <h3>Rules that make it feel reliable</h3>
+  <ul>
+    <li><b>Look ahead, not just at the next step.</b> Players skip and reorder. If an event matches a step a few places ahead, complete it and mark anything skipped as "inferred" in a different colour.</li>
+    <li><b>Every step can be ticked and unticked by hand.</b> Click on the panel or a global hotkey. Automatic detection is an assist, never the only way forward.</li>
+    <li><b>Key on area id, not name.</b> Take the id from the <code>Generating level</code> line and treat the following <code>You have entered</code> line as confirmation.</li>
+    <li><b>Ignore noise zones.</b> Hideouts, towns you revisit and map ids should not move a campaign pointer.</li>
+    <li><b>Offer a resync.</b> When the player types <code>/passives</code>, read the quest names that follow and tick every matching quest step at once. If you bind that command to a hotkey, the player must press it: one press, one chat command, which is what the macro rule permits.</li>
+    <li><b>Catch up on start.</b> On launch, scan backwards through the tail of the log to the last <code>LOG FILE … OPENING</code> line and replay those events, so opening the overlay mid-session still shows the right state.</li>
+    <li><b>Save per character.</b> Store progress keyed by character name, learned from level-up or death lines, with a manual picker as fallback.</li>
+    <li><b>Tell the user what you read.</b> The policy's one condition for log reading is that the user is aware of it. A first-run notice covers that.</li>
+  </ul>
+</section>
+
+<section id="code">
+  <h2>Starter code</h2>
+  <p>Three small pieces in TypeScript for Electron. The parser patterns are the ones tested against your log.</p>
+
+  <h3>1. Overlay window</h3>
+  <pre><code><span class="c">// main.ts</span>
+<span class="k">import</span> { app, BrowserWindow, ipcMain, screen } <span class="k">from</span> <span class="s">'electron'</span>
+
+app.whenReady().then(() =&gt; {
+  <span class="k">const</span> { bounds } = screen.getPrimaryDisplay()
+  <span class="k">const</span> win = <span class="k">new</span> BrowserWindow({
+    ...bounds,
+    transparent: <span class="k">true</span>, frame: <span class="k">false</span>, hasShadow: <span class="k">false</span>,
+    resizable: <span class="k">false</span>, skipTaskbar: <span class="k">true</span>,
+    focusable: <span class="k">false</span>,                 <span class="c">// clicks never steal focus from the game</span>
+    webPreferences: { preload: __dirname + <span class="s">'/preload.js'</span> },
+  })
+  win.setAlwaysOnTop(<span class="k">true</span>, <span class="s">'screen-saver'</span>)
+  win.setVisibleOnAllWorkspaces(<span class="k">true</span>, { visibleOnFullScreen: <span class="k">true</span> })  <span class="c">// macOS Spaces</span>
+  win.setIgnoreMouseEvents(<span class="k">true</span>, { forward: <span class="k">true</span> })                 <span class="c">// click-through by default</span>
+
+  <span class="c">// renderer tells us when the pointer is over the panel</span>
+  ipcMain.on(<span class="s">'overlay:hover'</span>, (_e, over: boolean) =&gt;
+    win.setIgnoreMouseEvents(!over, { forward: <span class="k">true</span> }))
+
+  win.loadFile(<span class="s">'index.html'</span>)
+})</code></pre>
+  <pre><code><span class="c">// renderer: flip click-through as the pointer enters or leaves the panel</span>
+<span class="k">const</span> panel = document.querySelector(<span class="s">'#panel'</span>)!
+panel.addEventListener(<span class="s">'mouseenter'</span>, () =&gt; window.overlay.hover(<span class="k">true</span>))
+panel.addEventListener(<span class="s">'mouseleave'</span>, () =&gt; window.overlay.hover(<span class="k">false</span>))</code></pre>
+  <p>For production, swap the fixed primary-display bounds for <code>electron-overlay-window</code>, which attaches to the game window by title and shows or hides the overlay as the game gains and loses focus.</p>
+
+  <h3>2. Log tailer</h3>
+  <pre><code><span class="c">// tail.ts: emit each new line appended to Client.txt</span>
+<span class="k">import</span> fs <span class="k">from</span> <span class="s">'node:fs'</span>
+
+<span class="k">export function</span> tail(path: string, onLine: (line: string) =&gt; void) {
+  <span class="k">let</span> pos = fs.statSync(path).size        <span class="c">// start at the end: the file is large</span>
+  <span class="k">let</span> rest = <span class="s">''</span>
+  setInterval(() =&gt; {
+    <span class="k">const</span> size = fs.statSync(path).size
+    <span class="k">if</span> (size &lt; pos) pos = 0                <span class="c">// file was truncated or replaced</span>
+    <span class="k">if</span> (size === pos) <span class="k">return</span>
+    <span class="k">const</span> buf = Buffer.alloc(size - pos)
+    <span class="k">const</span> fd = fs.openSync(path, <span class="s">'r'</span>)
+    fs.readSync(fd, buf, 0, buf.length, pos); fs.closeSync(fd)
+    pos = size
+    <span class="k">const</span> lines = (rest + buf.toString(<span class="s">'utf8'</span>)).split(<span class="s">/\r?\n/</span>)
+    rest = lines.pop() ?? <span class="s">''</span>               <span class="c">// keep a partial last line for next time</span>
+    lines.forEach(l =&gt; l &amp;&amp; onLine(l))
+  }, 250)
+}</code></pre>
+  <p>Polling the file size every 250 ms is more dependable than file-system watch events, which can be delayed or merged while the game holds the file open. Your log is 18 MB, so never read it from the start on each tick.</p>
+
+  <h3>3. Parser</h3>
+  <pre><code><span class="c">// parse.ts: turn one log line into a typed event, or null</span>
+<span class="k">const</span> LINE = <span class="s">/^(\d{4}\/\d\d\/\d\d \d\d:\d\d:\d\d) \d+ [0-9a-f]+ \[(INFO|DEBUG|WARN|CRIT) Client \d+\] (.*)$/</span>
+
+<span class="k">const</span> RULES = {
+  areaGen:  <span class="s">/^Generating level (\d+) area "([^"]+)" with seed (\d+)/</span>,
+  entered:  <span class="s">/^: You have entered (.+)\.$/</span>,
+  level:    <span class="s">/^: (.+) \((\w+)\) is now level (\d+)$/</span>,
+  slain:    <span class="s">/^: (.+) has been slain\.$/</span>,
+  points:   <span class="s">/^: You have received (?:an?|(\d+)) (.+?) Points?\.$/</span>,
+  passive:  <span class="s">/^Successfully (allocated|unallocated) passive skill id: (\S+), name: (.+)$/</span>,
+  questPt:  <span class="s">/^: \((\d+) from (.+)\)$/</span>,
+  kitava:   <span class="s">/^: You have been permanently weakened by Kitava's (cruel|merciless) affliction/</span>,
+  trade:    <span class="s">/^: Trade (accepted|cancelled)\.$/</span>,
+  whisper:  <span class="s">/^@(From|To) (?:&lt;.+?&gt; )?(.+?): (.*)$/</span>,
+  loading:  <span class="s">/^\[LOADING SCREEN\] \((.+)\) Duration = ([\d.]+) seconds/</span>,
+}
+<span class="c">// NPC dialogue has the form "Speaker: text". Match against known names only,</span>
+<span class="c">// because engine lines such as "Tile hash: 123" have the same shape.</span>
+<span class="k">const</span> NPCS = <span class="k">new</span> Set([<span class="s">'Izaro'</span>, <span class="s">'Einhar, Beastmaster'</span>, <span class="s">'Jun, Veiled Master'</span>, <span class="s">'The Maven'</span>])
+
+<span class="k">export function</span> parse(line: string) {
+  <span class="k">const</span> m = LINE.exec(line)
+  <span class="k">if</span> (!m) <span class="k">return</span> line.includes(<span class="s">'LOG FILE'</span>) ? { type: <span class="s">'clientStart'</span> } : <span class="k">null</span>
+  <span class="k">const</span> [, time, , body] = m
+  <span class="k">for</span> (<span class="k">const</span> [type, re] <span class="k">of</span> Object.entries(RULES)) {
+    <span class="k">const</span> x = re.exec(body)
+    <span class="k">if</span> (x) <span class="k">return</span> { type, time, args: x.slice(1) }
+  }
+  <span class="k">const</span> i = body.indexOf(<span class="s">': '</span>)
+  <span class="k">if</span> (i &gt; 0 &amp;&amp; NPCS.has(body.slice(0, i)))
+    <span class="k">return</span> { type: <span class="s">'npc'</span>, time, args: [body.slice(0, i), body.slice(i + 2)] }
+  <span class="k">return</span> <span class="k">null</span>
+}</code></pre>
+  <div class="note"><p><b>Language matters.</b> These patterns match the English client. System messages are localised, so other languages need their own message strings. The <code>Generating level … area</code> and <code>Successfully allocated passive</code> lines are engine output and I would expect them to stay in English, but I only had an English log to check.</p></div>
+</section>
+
+<section id="plan">
+  <h2>Build order</h2>
+  <ol class="steps">
+    <li><div><b>Log reader in a terminal</b><p>Tailer plus parser printing events while you play. No UI yet. This proves the core idea in an evening.</p></div></li>
+    <li><div><b>Bare overlay window</b><p>A transparent Electron window with one box that stays above the game in Windowed Fullscreen. Sort out click-through and focus on your Mac here, before anything else depends on it.</p></div></li>
+    <li><div><b>Checklist engine</b><p>Step JSON, rule matching with look-ahead, manual tick, saved state. Unit-test it by replaying slices of your existing log.</p></div></li>
+    <li><div><b>Wire them together</b><p>Events from the main process to the renderer over IPC. Act 1 checklist ticking itself is the first real milestone.</p></div></li>
+    <li><div><b>Game-window tracking and hotkeys</b><p>Attach to the game window, hide on alt-tab, add a show/hide hotkey and a "tick current step" hotkey.</p></div></li>
+    <li><div><b>Content and extras</b><p>Full campaign data from <code>exile-leveling</code>, the <code>/passives</code> resync, passive-tree checklist, clipboard item checks, a checklist editor.</p></div></li>
+  </ol>
+</section>
+
+<section id="prior">
+  <h2>Tools to study</h2>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th style="width:170px">Project</th><th>Stack</th><th>Why read it</th></tr></thead>
+    <tbody>
+      <tr><td><a href="https://github.com/SnosMe/awakened-poe-trade">Awakened PoE Trade</a></td><td>Electron, Vue, TypeScript</td><td>The reference overlay. Window handling, focus logic, clipboard item parsing. Builds for Windows, Linux and macOS.</td></tr>
+      <tr><td><a href="https://github.com/SnosMe/electron-overlay-window">electron-overlay-window</a></td><td>Native Node addon</td><td>Attaches an Electron window to a target window by title and keeps it in sync. One overlay window per app.</td></tr>
+      <tr><td><a href="https://github.com/Lailloken/Exile-UI">Exile-UI</a></td><td>AutoHotkey</td><td>Closest to your idea: its Act-Tracker is an automated campaign guide driven by Client.txt (level, area, NPC dialogue).</td></tr>
+      <tr><td><a href="https://github.com/HeartofPhos/exile-leveling">exile-leveling</a></td><td>TypeScript web app, MIT</td><td>Campaign route plus area, quest and gem data seeded from game files. Exile-UI's default guide derives from it.</td></tr>
+      <tr><td><a href="https://github.com/klayveR/poe-log-monitor">poe-log-monitor</a></td><td>Node library</td><td>An older event list for Client.txt: area, level, death, whisper, trade, NPC encounter, AFK. Good for message patterns I had no samples of.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="sources">
+  <h2>Sources</h2>
+  <ul class="sources">
+    <li><a href="https://www.pathofexile.com/developer/docs">Path of Exile developer docs</a>: third-party policy, rate limits, registration status</li>
+    <li><a href="https://www.pathofexile.com/developer/docs/authorization">Developer docs, Authorization</a>: client types, PKCE, token lifetimes, scopes</li>
+    <li><a href="https://snosme.github.io/awakened-poe-trade/download">Awakened PoE Trade download page</a>: platforms and display-mode requirement</li>
+    <li><a href="https://github.com/SnosMe/electron-overlay-window">electron-overlay-window README and source</a></li>
+    <li><a href="https://github.com/Lailloken/Exile-UI">Exile-UI README</a>: data sources and policy stance</li>
+    <li><a href="https://github.com/HeartofPhos/exile-leveling">exile-leveling README</a></li>
+    <li><a href="https://github.com/klayveR/poe-log-monitor">poe-log-monitor README</a></li>
+    <li><a href="https://pathofexile.com/forum/view-thread/3637217">GGG forum replies on third-party tools</a></li>
+    <li>Your local <code>Client.txt</code>, 163,140 lines, read on 10 November 2026: line formats, counts and area ids</li>
+  </ul>
+  <footer><p>Not affiliated with or endorsed by Grinding Gear Games. Policies change, so re-read the developer docs before you publish a tool. The clipboard shortcuts and the Windows window-style notes come from general knowledge of how existing tools work and were not re-verified in this research.</p></footer>
+</section>
+</main>
+</div>
+
+</body></html>

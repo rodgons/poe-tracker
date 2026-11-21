@@ -1,0 +1,15 @@
+# Glossary
+
+**Build**: A Path of Building build the player wants to follow, imported from a PoB export code or a pastebin link.
+
+**Tree spec**: One of the named passive trees stored inside a Build (e.g. "Level 30", "Final"). The player picks which Tree spec to follow.
+
+**Allocated node**: A passive tree node the player's character currently has.
+
+**Next points**: The ordered handful of nodes in the chosen Tree spec that the player should allocate next. Not stored in the Build; derived from the Tree spec and the Allocated nodes.
+
+**Mini-tree**: A small drawing of the passive tree, zoomed to the area being built into, showing Allocated nodes and the numbered Next points. A picture beside the game, not aligned with the game's own tree.
+
+**Corner panel**: The small window in a screen corner that holds the Mini-tree and the names of the Next points. Shown when the player opens the in-game passive tree.
+
+**Client log**: The `Client.txt` file the game appends to as things happen; the source of live allocation events.
