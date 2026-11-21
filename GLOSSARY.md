@@ -6,6 +6,10 @@
 
 **Allocated node**: A passive tree node the player's character currently has.
 
+**Character**: The player's in-game character the app follows, chosen in setup. Every allocation in the Client log is credited to it.
+
+**Seed**: The starting set of Allocated nodes for the Character, taken once at setup or on re-sync. Live allocations in the Client log change it from then on.
+
 **Next points**: The ordered handful of nodes in the chosen Tree spec that the player should allocate next. Not stored in the Build; derived from the Tree spec and the Allocated nodes.
 
 **Refund**: An Allocated node that the chosen Tree spec doesn't contain, so the player should take it back. Listed apart from the Next points.
