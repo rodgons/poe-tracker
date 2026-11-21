@@ -18,6 +18,8 @@
 
 **Corner panel**: The small window in a screen corner that holds the Mini-tree, the Tree spec's progress and any Refunds. Toggled by the Panel hotkey while Path of Exile is the frontmost app.
 
+**Setup window**: The ordinary app window where the player pastes their Build, picks the Tree spec and names their Character. Opened on first launch and from the tray menu, it is the only window the player clicks in; the Corner panel only shows things.
+
 **Panel hotkey**: The key combination (⌥/Alt+P) that toggles the Corner panel. Distinct from the game's own key for opening the passive tree, which the app ignores.
 
 **Client log**: The `Client.txt` file the game appends to as things happen; the source of live allocation events.
