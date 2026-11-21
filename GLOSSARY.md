@@ -10,6 +10,8 @@
 
 **Mini-tree**: A small drawing of the passive tree, zoomed to the area being built into, showing Allocated nodes and the numbered Next points. A picture beside the game, not aligned with the game's own tree.
 
-**Corner panel**: The small window in a screen corner that holds the Mini-tree and the names of the Next points. Shown when the player opens the in-game passive tree.
+**Corner panel**: The small window in a screen corner that holds the Mini-tree and the names of the Next points. Toggled by the Panel hotkey while Path of Exile is the frontmost app.
+
+**Panel hotkey**: The key combination (⌥/Alt+P) that toggles the Corner panel. Distinct from the game's own key for opening the passive tree, which the app ignores.
 
 **Client log**: The `Client.txt` file the game appends to as things happen; the source of live allocation events.

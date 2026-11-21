@@ -25,8 +25,9 @@
     <dt>Last key</dt><dd id="key">–</dd>
     <dt>Presses seen</dt><dd id="presses">0</dd>
     <dt>Permission</dt><dd id="permission">–</dd>
+    <dt>Frontmost</dt><dd id="frontmost">–</dd>
   </dl>
-  <p>P toggles this panel · Esc hides it · Quit from the tray / menu bar icon</p>
+  <p>⌥/Alt+P toggles this panel while in Path of Exile · Esc hides it · Quit from the tray / menu bar icon</p>
 </div>
 <script>
   const { invoke } = window.__TAURI__.core
@@ -37,6 +38,9 @@
     const p = document.getElementById('permission')
     p.textContent = s.permission
     p.className = s.permission.includes('NOT') ? 'bad' : ''
+    const f = document.getElementById('frontmost')
+    f.textContent = (s.in_poe ? '✓ ' : '') + s.frontmost
+    f.className = s.in_poe ? '' : 'bad'
   }
   invoke('initial_status').then(render)
   listen('status', e => render(e.payload))

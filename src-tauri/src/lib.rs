@@ -1,16 +1,24 @@
-// Skeleton: a corner panel toggled by a listen-only P / Esc hook.
+// Skeleton: a corner panel toggled by the panel hotkey (Alt/Option+P) while
+// Path of Exile is frontmost, via a listen-only key hook.
 // Nothing here ever sends input to the game.
 use serde::Serialize;
-use std::sync::mpsc;
+use std::{sync::mpsc, time::Duration};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow,
 };
 
+mod foreground;
 mod keys;
 #[cfg(target_os = "macos")]
 mod macos;
+
+pub enum Msg {
+    Hotkey,
+    Esc,
+    Frontmost(String),
+}
 
 #[derive(Clone, Serialize)]
 struct Status {
@@ -18,6 +26,8 @@ struct Status {
     presses: u32,
     visible: bool,
     permission: &'static str,
+    frontmost: String,
+    in_poe: bool,
 }
 
 fn permission() -> &'static str {
@@ -51,34 +61,73 @@ fn hide(win: &WebviewWindow) {
     let _ = win.hide();
 }
 
-fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<keys::TreeKey>) {
+fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
     let mut presses = 0;
+    // shown at launch so the player can see the app is running
     let mut visible = true;
-    for key in rx {
-        presses += 1;
-        visible = match key {
-            keys::TreeKey::P => !visible,
-            keys::TreeKey::Esc => false,
-        };
-        let name = match key {
-            keys::TreeKey::P => "P",
-            keys::TreeKey::Esc => "Esc",
+    let mut frontmost = foreground::frontmost_app();
+    let mut key = "none yet";
+    for msg in rx {
+        let in_poe = foreground::is_poe(&frontmost);
+        match msg {
+            Msg::Hotkey if in_poe => {
+                presses += 1;
+                key = "⌥/Alt+P";
+                visible = !visible;
+            }
+            Msg::Esc if in_poe && visible => {
+                key = "Esc";
+                visible = false;
+            }
+            Msg::Frontmost(name) => {
+                if name == frontmost {
+                    continue;
+                }
+                // leaving the game hides the panel; coming back doesn't reopen it
+                if in_poe && !foreground::is_poe(&name) {
+                    visible = false;
+                }
+                frontmost = name;
+            }
+            _ => continue,
+        }
+        let status = Status {
+            key,
+            presses,
+            visible,
+            permission: permission(),
+            in_poe: foreground::is_poe(&frontmost),
+            frontmost: frontmost.clone(),
         };
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
             let Some(win) = handle.get_webview_window("corner") else { return };
-            if visible { show(&win) } else { hide(&win) }
-            let _ = win.emit(
-                "status",
-                Status { key: name, presses, visible, permission: permission() },
-            );
+            if status.visible { show(&win) } else { hide(&win) }
+            let _ = win.emit("status", status);
         });
+    }
+}
+
+fn poll_frontmost(tx: mpsc::Sender<Msg>) {
+    loop {
+        if tx.send(Msg::Frontmost(foreground::frontmost_app())).is_err() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(500));
     }
 }
 
 #[tauri::command]
 fn initial_status() -> Status {
-    Status { key: "none yet", presses: 0, visible: true, permission: permission() }
+    let frontmost = foreground::frontmost_app();
+    Status {
+        key: "none yet",
+        presses: 0,
+        visible: true,
+        permission: permission(),
+        in_poe: foreground::is_poe(&frontmost),
+        frontmost,
+    }
 }
 
 pub fn run() {
@@ -118,7 +167,8 @@ pub fn run() {
                 .build(app)?;
 
             let (tx, rx) = mpsc::channel();
-            keys::spawn(tx);
+            keys::spawn(tx.clone());
+            std::thread::spawn(move || poll_frontmost(tx));
             let handle = app.handle().clone();
             std::thread::spawn(move || run_toggle_loop(handle, rx));
             Ok(())
