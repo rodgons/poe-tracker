@@ -14,9 +14,9 @@
 
 **Refund**: An Allocated node that the chosen Tree spec doesn't contain, so the player should take it back. Listed apart from the Next points.
 
-**Mini-tree**: A small drawing of the passive tree, zoomed to the area being built into, showing Allocated nodes and the numbered Next points. A picture beside the game, not aligned with the game's own tree.
+**Mini-tree**: A small drawing of the whole Tree spec, showing Allocated nodes, the numbered Next points and the spec's later points, with nearby nodes outside the spec dimmed for context. A picture beside the game, not aligned with the game's own tree.
 
-**Corner panel**: The small window in a screen corner that holds the Mini-tree and the names of the Next points. Toggled by the Panel hotkey while Path of Exile is the frontmost app.
+**Corner panel**: The small window in a screen corner that holds the Mini-tree, the Tree spec's progress and any Refunds. Toggled by the Panel hotkey while Path of Exile is the frontmost app.
 
 **Panel hotkey**: The key combination (⌥/Alt+P) that toggles the Corner panel. Distinct from the game's own key for opening the passive tree, which the app ignores.
 
