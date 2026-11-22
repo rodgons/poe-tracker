@@ -27,6 +27,10 @@
   input:focus, textarea:focus, select:focus { outline: 2px solid var(--gold); outline-offset: -1px; }
   .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .row input[type=number] { width: 90px; }
+  .row input:not([type=number]) { flex: 1; }
+  .opt { display: flex; gap: 8px; align-items: center; font-weight: 400; margin: 8px 0 0; cursor: pointer; }
+  .opt input { width: auto; margin: 0; accent-color: var(--gold); }
+  .indent { margin-left: 22px; }
   .hint { color: var(--dim); font-size: 12px; margin-top: 6px; }
   .hint b { color: var(--next); font-weight: 600; }
   button {
@@ -55,10 +59,16 @@
 <section id="pick" class="off">
   <label for="spec">Tree spec</label>
   <select id="spec"></select>
+  <label for="account" style="margin-top:12px">pathofexile.com account <small>(Name#1234, to import your taken points)</small></label>
+  <div class="row"><input id="account" spellcheck="false" autocomplete="off" placeholder="Name#1234"><button class="ghost" id="find">Find characters</button></div>
+  <p class="hint" id="found"></p>
   <label for="character" style="margin-top:12px">Character name <small>(the character this build is for)</small></label>
-  <input id="character" spellcheck="false" autocomplete="off">
-  <label for="taken" style="margin-top:12px">Points already taken in this spec</label>
-  <div class="row"><input type="number" id="taken" min="0" value="0"><span class="hint" id="takenHint"></span></div>
+  <input id="character" list="chars" spellcheck="false" autocomplete="off">
+  <datalist id="chars"></datalist>
+  <label style="margin-top:12px">Points already taken</label>
+  <label class="opt"><input type="radio" name="seed" value="import"> Import from pathofexile.com <small class="hint">(your Characters tab must be public)</small></label>
+  <label class="opt"><input type="radio" name="seed" value="hand"> Set by hand</label>
+  <div class="row indent"><input type="number" id="taken" min="0" value="0"><span class="hint" id="takenHint"></span></div>
 </section>
 
 <section>
@@ -71,6 +81,7 @@
 <script>
   const { invoke } = window.__TAURI__.core
   const $ = id => document.getElementById(id)
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
   let order = []
 
   function showSpecs(specs, chosen) {
@@ -110,19 +121,48 @@
     }
   }
   $('spec').onchange = loadOrder
-  $('taken').oninput = hint
+  $('taken').oninput = () => { setSeed('hand'); hint() }
+  $('taken').onfocus = () => setSeed('hand')
+
+  const seed = () => document.querySelector('input[name=seed]:checked')?.value ?? 'hand'
+  function setSeed(how) {
+    document.querySelector(`input[name=seed][value=${how}]`).checked = true
+    $('takenHint').style.opacity = how === 'hand' ? 1 : .45
+  }
+  document.querySelectorAll('input[name=seed]').forEach(r => r.onchange = () => setSeed(r.value))
+  $('account').oninput = () => { if ($('account').value.trim()) setSeed('import') }
+
+  $('find').onclick = async () => {
+    $('found').textContent = 'Looking…'; $('find').disabled = true
+    try {
+      const chars = await invoke('find_characters', { account: $('account').value })
+      $('chars').innerHTML = chars.map(c => `<option value="${esc(c.name)}">${esc(c.class)} ${c.level} · ${esc(c.league)}</option>`).join('')
+      $('found').textContent = `${chars.length} characters: pick one in Character name`
+      $('found').style.color = ''
+    } catch (e) {
+      $('found').textContent = e; $('found').style.color = 'var(--bad)'
+    } finally {
+      $('find').disabled = false
+    }
+  }
 
   $('save').onclick = async () => {
     $('saveErr').textContent = ''
     if (!$('character').value.trim()) { $('saveErr').textContent = 'Type your character name.'; return }
+    const importing = seed() === 'import'
+    if (importing && !$('account').value.trim()) { $('saveErr').textContent = 'Type your account name, or set the points by hand.'; return }
+    $('save').disabled = true; $('save').textContent = importing ? 'Importing…' : 'Save'
     try {
       await invoke('save_setup', {
         spec: Number($('spec').value),
+        account: $('account').value,
         character: $('character').value,
-        taken: Math.max(0, Math.min(order.length, Number($('taken').value) || 0)),
+        taken: importing ? null : Math.max(0, Math.min(order.length, Number($('taken').value) || 0)),
       })
     } catch (e) {
-      $('saveErr').textContent = e
+      $('saveErr').textContent = importing && !String(e).includes('by hand') ? `${e} Or set the points by hand.` : e
+    } finally {
+      $('save').disabled = false; $('save').textContent = 'Save'
     }
   }
 
@@ -134,10 +174,14 @@
     try { const p = await invoke('choose_log'); if (p) showLog(p) } catch (e) { $('saveErr').textContent = e }
   }
 
+  window.__TAURI__.event.listen('resync_error', e => { setSeed('import'); $('saveErr').textContent = e.payload })
+
   invoke('current_setup').then(s => {
     showLog(s.log_path)
     $('input').value = s.input
+    $('account').value = s.account
     $('character').value = s.character
+    setSeed(s.account ? 'import' : 'hand')
     $('taken').value = s.taken
     if (s.specs.length) {
       $('loaded').textContent = `${s.specs.length} tree specs · shown on tree ${s.tree_version}`

@@ -195,6 +195,14 @@ impl Plan {
         have
     }
 
+    /// Allocated nodes from a pathofexile.com import: every main-tree node the
+    /// character has (off-plan ones become Refunds), plus the class start.
+    pub fn from_import(&self, tree: &Tree, hashes: &[u32]) -> HashSet<u32> {
+        let mut have: HashSet<u32> = hashes.iter().copied().filter(|n| tree.nodes.contains_key(n)).collect();
+        have.insert(self.start);
+        have
+    }
+
     fn label(&self, tree: &Tree, id: u32) -> String {
         let node = &tree.nodes[&id];
         match self.masteries.get(&id).and_then(|e| node.masteries.get(&e.to_string())) {
@@ -340,6 +348,22 @@ mod tests {
         let view = plan.view(t, &have, 5);
         assert_eq!(view.refunds, vec![t.nodes[&stray].name.clone()]);
         assert_eq!(view.done, 3);
+    }
+
+    #[test]
+    fn imports_keep_main_tree_nodes() {
+        let t = tree();
+        let plan = lvl_01_30();
+        let first: Vec<u32> = plan.order(t, &HashSet::new()).into_iter().take(4).collect();
+        let ascendancy = *t.skip.iter().next().unwrap();
+        let stray = *t.nodes.keys().find(|n| !plan.nodes.contains(n) && **n != plan.start && t.nodes[n].kind == "notable").unwrap();
+        let mut hashes = first.clone();
+        hashes.extend([ascendancy, stray, 70000]);
+        let have = plan.from_import(t, &hashes);
+        assert_eq!(have.len(), 6);
+        let view = plan.view(t, &have, 5);
+        assert_eq!(view.done, 4);
+        assert_eq!(view.refunds, vec![t.nodes[&stray].name.clone()]);
     }
 
     #[test]

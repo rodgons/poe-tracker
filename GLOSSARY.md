@@ -8,7 +8,7 @@
 
 **Character**: The player's in-game character the app follows, chosen in setup. Every allocation in the Client log is credited to it, except while the log's latest level-up names a different character; then ticking pauses until the Character levels up again or the player re-syncs.
 
-**Seed**: The starting set of Allocated nodes for the Character, taken once at setup or on re-sync. Live allocations in the Client log change it from then on.
+**Seed**: The starting set of Allocated nodes for the Character, taken once at setup or on re-sync. It is imported from the Character's public pathofexile.com profile, or set by hand as "the first N points" when the profile is private or the import fails. Live allocations in the Client log change it from then on.
 
 **Next points**: The ordered handful of nodes in the chosen Tree spec that the player should allocate next. Not stored in the Build; derived from the Tree spec and the Allocated nodes.
 
