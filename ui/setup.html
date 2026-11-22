@@ -61,10 +61,10 @@
   <select id="spec"></select>
   <label for="account" style="margin-top:12px">pathofexile.com account <small>(Name#1234, to import your taken points)</small></label>
   <div class="row"><input id="account" spellcheck="false" autocomplete="off" placeholder="Name#1234"><button class="ghost" id="find">Find characters</button></div>
-  <p class="hint" id="found"></p>
+  <div class="row"><p class="hint" id="found" style="flex:1;margin:0"></p><label class="opt" style="margin:0"><input type="checkbox" id="currentOnly" checked> Current league only</label></div>
   <label for="character" style="margin-top:12px">Character name <small>(the character this build is for)</small></label>
-  <input id="character" list="chars" spellcheck="false" autocomplete="off">
-  <datalist id="chars"></datalist>
+  <input id="character" spellcheck="false" autocomplete="off">
+  <select id="charPick" hidden></select>
   <label style="margin-top:12px">Points already taken</label>
   <label class="opt"><input type="radio" name="seed" value="import"> Import from pathofexile.com <small class="hint">(your Characters tab must be public)</small></label>
   <label class="opt"><input type="radio" name="seed" value="hand"> Set by hand</label>
@@ -132,13 +132,31 @@
   document.querySelectorAll('input[name=seed]').forEach(r => r.onchange = () => setSeed(r.value))
   $('account').oninput = () => { if ($('account').value.trim()) setSeed('import') }
 
+  let chars = []
+  $('charPick').onchange = () => { $('character').value = $('charPick').value }
+  function showChars() {
+    const current = chars.filter(c => c.current)
+    const shown = $('currentOnly').checked ? current : chars
+    const typed = $('character').value.trim()
+    const list = typed && !shown.some(c => c.name === typed) ? [{ name: typed, other: true }, ...shown] : shown
+    $('charPick').innerHTML = list.map(c => `<option value="${esc(c.name)}">${esc(c.name)}${c.other ? '' : ` · ${esc(c.class)} ${c.level} · ${esc(c.league)}`}</option>`).join('')
+    if (!typed && shown.length) $('character').value = shown[0].name
+    $('charPick').value = $('character').value
+    $('charPick').hidden = !list.length; $('character').hidden = !!list.length
+    const leagues = [...new Set(current.map(c => c.league))].join(', ')
+    $('found').textContent = $('currentOnly').checked
+      ? `${shown.length} in ${leagues || 'the current league'}, ${chars.length} in all`
+      : `${shown.length} characters`
+    $('found').style.color = ''
+  }
+  $('currentOnly').onchange = () => { try { localStorage.setItem('currentOnly', $('currentOnly').checked) } catch {} ; if (chars.length) showChars() }
+  try { $('currentOnly').checked = localStorage.getItem('currentOnly') !== 'false' } catch {}
+
   $('find').onclick = async () => {
     $('found').textContent = 'Looking…'; $('find').disabled = true
     try {
-      const chars = await invoke('find_characters', { account: $('account').value })
-      $('chars').innerHTML = chars.map(c => `<option value="${esc(c.name)}">${esc(c.class)} ${c.level} · ${esc(c.league)}</option>`).join('')
-      $('found').textContent = `${chars.length} characters: pick one in Character name`
-      $('found').style.color = ''
+      chars = await invoke('find_characters', { account: $('account').value })
+      showChars()
     } catch (e) {
       $('found').textContent = e; $('found').style.color = 'var(--bad)'
     } finally {

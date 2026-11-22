@@ -18,6 +18,7 @@
         "visible": true,
         "focus": false,
         "focusable": false,
+        "acceptFirstMouse": true,
         "alwaysOnTop": true,
         "visibleOnAllWorkspaces": true,
         "decorations": false,

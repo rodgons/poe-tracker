@@ -11,6 +11,9 @@ pub struct Character {
     pub class: String,
     pub league: String,
     pub level: u32,
+    /// in a league of the current season, not Standard or another permanent one
+    #[serde(default)]
+    pub current: bool,
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -38,8 +41,46 @@ pub fn account_param(account: &str) -> String {
         .collect()
 }
 
+/// The account's characters, each marked with whether its league is this season's.
 pub fn characters(account: &str) -> Result<Vec<Character>, String> {
-    parse_characters(&get(&format!("{SITE}/get-characters?accountName={}&realm=pc", account_param(account)))?)
+    let mut chars = parse_characters(&get(&format!("{SITE}/get-characters?accountName={}&realm=pc", account_param(account)))?)?;
+    let current = get("https://www.pathofexile.com/api/leagues?type=main&realm=pc").ok().and_then(|b| current_leagues(&b));
+    for c in &mut chars {
+        c.current = match &current {
+            Some(leagues) => leagues.iter().any(|l| *l == c.league),
+            // the league list is down: anything that isn't a permanent league
+            None => !PERMANENT.contains(&c.league.as_str()),
+        };
+    }
+    Ok(chars)
+}
+
+const PERMANENT: [&str; 8] = [
+    "Standard",
+    "Hardcore",
+    "Solo Self-Found",
+    "Hardcore SSF",
+    "Ruthless",
+    "Hardcore Ruthless",
+    "SSF Ruthless",
+    "Hardcore SSF Ruthless",
+];
+
+/// The leagues GGG marks as the current season (`category.current`).
+fn current_leagues(body: &str) -> Option<Vec<String>> {
+    #[derive(Deserialize)]
+    struct League {
+        id: String,
+        #[serde(default)]
+        category: Category,
+    }
+    #[derive(Default, Deserialize)]
+    struct Category {
+        #[serde(default)]
+        current: bool,
+    }
+    let leagues: Vec<League> = serde_json::from_str(body).ok()?;
+    Some(leagues.into_iter().filter(|l| l.category.current).map(|l| l.id).collect())
 }
 
 pub fn passives(account: &str, character: &str) -> Result<Passives, String> {
@@ -93,9 +134,16 @@ mod tests {
         let body = r#"[{"name":"shiefire","realm":"pc","class":"Chieftain","league":"Covens","level":75,"lastLoginTime":1,"pinnable":false}]"#;
         assert_eq!(
             parse_characters(body).unwrap(),
-            vec![Character { name: "shiefire".into(), class: "Chieftain".into(), league: "Covens".into(), level: 75 }]
+            vec![Character { name: "shiefire".into(), class: "Chieftain".into(), league: "Covens".into(), level: 75, current: false }]
         );
         assert_eq!(parse_characters("<!DOCTYPE html><html>").unwrap_err(), NOT_FOUND);
+    }
+
+    #[test]
+    fn finds_the_current_season() {
+        let body = r#"[{"id":"Standard","category":{"id":"Standard"}},{"id":"Covens","category":{"id":"Coven","current":true}},
+            {"id":"Hardcore Covens","category":{"id":"Coven","current":true}},{"id":"Old","endAt":"2025-01-01"}]"#;
+        assert_eq!(current_leagues(body).unwrap(), vec!["Covens", "Hardcore Covens"]);
     }
 
     #[test]

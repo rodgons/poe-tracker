@@ -117,6 +117,17 @@ fn place_in_corner(win: &WebviewWindow) {
     let _ = win.set_position(PhysicalPosition::new(x, y));
 }
 
+/// Clicking the panel mustn't take focus from the game.
+#[cfg(target_os = "windows")]
+fn no_activate(win: &WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE};
+    let Ok(hwnd) = win.hwnd() else { return };
+    unsafe {
+        let hwnd = hwnd.0 as _;
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, GetWindowLongPtrW(hwnd, GWL_EXSTYLE) | WS_EX_NOACTIVATE as isize);
+    }
+}
+
 fn show(win: &WebviewWindow) {
     #[cfg(target_os = "macos")]
     macos::order_front(win);
@@ -461,6 +472,17 @@ fn resync(app: &AppHandle) {
     });
 }
 
+/// Shrinks the corner window to the panel, so the empty space under it doesn't
+/// catch clicks meant for the game.
+#[tauri::command]
+fn fit_panel(height: f64, app: AppHandle) {
+    let Some(win) = app.get_webview_window("corner") else { return };
+    let Ok(scale) = win.scale_factor() else { return };
+    let Ok(size) = win.outer_size() else { return };
+    let width = size.width as f64 / scale;
+    let _ = win.set_size(tauri::LogicalSize::new(width, height.clamp(80.0, 900.0)));
+}
+
 #[tauri::command]
 fn panel_view(state: State<'_, AppState>) -> Option<tree::PanelView> {
     panel_view_of(&state.lock().unwrap())
@@ -506,7 +528,8 @@ pub fn run() {
             save_setup,
             panel_view,
             choose_log,
-            find_characters
+            find_characters,
+            fit_panel
         ])
         .setup(|app| {
             let path = store::path(app.path().app_config_dir()?);
@@ -522,10 +545,15 @@ pub fn run() {
 
             let win = app.get_webview_window("corner").expect("corner window");
             place_in_corner(&win);
-            // display-only panel: clicks fall through to the game, so it never takes focus
-            let _ = win.set_ignore_cursor_events(true);
+            // the panel takes the mouse (scroll to zoom, drag to move) but never focus,
+            // so the game keeps the keyboard
             #[cfg(target_os = "macos")]
-            macos::float_over_fullscreen(&win);
+            {
+                macos::make_nonactivating(&win);
+                macos::float_over_fullscreen(&win);
+            }
+            #[cfg(target_os = "windows")]
+            no_activate(&win);
 
             // closing the Setup window only hides it, so the tray can reopen it
             if let Some(setup) = app.get_webview_window("setup") {

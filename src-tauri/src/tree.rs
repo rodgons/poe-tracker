@@ -73,7 +73,7 @@ pub struct DrawnNode {
     y: i32,
     k: &'static str,
     n: String,
-    /// "alloc", "next", "plan" or "other"
+    /// "alloc", "refund", "next", "plan" or "other"
     s: &'static str,
     /// position in the Next points, 1-based; 0 when not next
     i: usize,
@@ -225,8 +225,10 @@ impl Plan {
         let mut drawn = Vec::new();
         let mut shown = HashSet::new();
         for (&id, node) in &tree.nodes {
-            let state = if allocated.contains(&id) || id == self.start {
+            let state = if id == self.start || (allocated.contains(&id) && self.is_mine(id)) {
                 "alloc"
+            } else if allocated.contains(&id) {
+                "refund"
             } else if next.contains(&id) {
                 "next"
             } else if self.nodes.contains(&id) {
@@ -348,6 +350,7 @@ mod tests {
         let view = plan.view(t, &have, 5);
         assert_eq!(view.refunds, vec![t.nodes[&stray].name.clone()]);
         assert_eq!(view.done, 3);
+        assert_eq!(view.nodes.iter().find(|n| n.id == stray).unwrap().s, "refund");
     }
 
     #[test]
