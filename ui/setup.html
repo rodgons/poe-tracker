@@ -35,6 +35,8 @@
   }
   button:disabled { opacity: .5; cursor: default; }
   button.ghost { background: transparent; color: var(--gold); border: 1px solid var(--gold); }
+  .path { flex: 1; word-break: break-all; font-family: var(--mono); font-size: 11px; margin: 0; }
+  .path.missing { color: var(--bad); font-family: var(--body); font-size: 12px; }
   .err { color: var(--bad); min-height: 1.5em; margin: 4px 0 0; }
   footer { display: flex; justify-content: flex-end; gap: 8px; align-items: center; }
   footer .err { flex: 1; margin: 0; }
@@ -57,6 +59,11 @@
   <input id="character" spellcheck="false" autocomplete="off">
   <label for="taken" style="margin-top:12px">Points already taken in this spec</label>
   <div class="row"><input type="number" id="taken" min="0" value="0"><span class="hint" id="takenHint"></span></div>
+</section>
+
+<section>
+  <label>Game log <small>(Client.txt, read only, so points tick off as you take them)</small></label>
+  <div class="row"><span class="hint path" id="logPath">Looking…</span><button class="ghost" id="chooseLog">Choose…</button></div>
 </section>
 
 <footer><p class="err" id="saveErr"></p><button id="save" disabled>Save</button></footer>
@@ -119,7 +126,16 @@
     }
   }
 
+  function showLog(path) {
+    $('logPath').textContent = path ?? 'Client.txt not found. Choose it from your Path of Exile folder (logs/Client.txt).'
+    $('logPath').classList.toggle('missing', !path)
+  }
+  $('chooseLog').onclick = async () => {
+    try { const p = await invoke('choose_log'); if (p) showLog(p) } catch (e) { $('saveErr').textContent = e }
+  }
+
   invoke('current_setup').then(s => {
+    showLog(s.log_path)
     $('input').value = s.input
     $('character').value = s.character
     $('taken').value = s.taken

@@ -33,7 +33,20 @@ pub struct Node {
 pub struct Tree {
     pub version: String,
     skip: HashSet<u32>,
+    /// the string ids Client.txt prints → node hash
+    ids: HashMap<String, u32>,
     pub nodes: HashMap<u32, Node>,
+}
+
+impl Tree {
+    /// The node a Client.txt passive line means: by its string id, or else by
+    /// name among `candidates` (an id the bundled tree doesn't know yet).
+    pub fn node_for_log(&self, id: &str, name: &str, candidates: impl IntoIterator<Item = u32>) -> Option<u32> {
+        if let Some(hash) = self.ids.get(id) {
+            return Some(*hash);
+        }
+        candidates.into_iter().find(|n| self.nodes.get(n).is_some_and(|node| node.name == name))
+    }
 }
 
 pub fn tree() -> &'static Tree {
@@ -82,7 +95,7 @@ pub struct PanelView {
     edges: Vec<(u32, u32)>,
     next: Vec<NextPoint>,
     refunds: Vec<String>,
-    notices: Vec<String>,
+    pub notices: Vec<String>,
     /// min x, min y, max x, max y of what's drawn
     bounds: (i32, i32, i32, i32),
 }
@@ -327,6 +340,17 @@ mod tests {
         let view = plan.view(t, &have, 5);
         assert_eq!(view.refunds, vec![t.nodes[&stray].name.clone()]);
         assert_eq!(view.done, 3);
+    }
+
+    #[test]
+    fn log_ids_map_to_nodes() {
+        let t = tree();
+        assert_eq!(t.node_for_log("life_regeneration1087", "Life Regeneration", []), Some(55906));
+        let plan = lvl_01_30();
+        let next = plan.order(t, &HashSet::new());
+        let name = t.nodes[&next[0]].name.clone();
+        assert_eq!(t.node_for_log("renamed_in_a_patch1", &name, next.iter().copied()), Some(next[0]));
+        assert_eq!(t.node_for_log("unknown1", "No Such Node", next), None);
     }
 
     #[test]

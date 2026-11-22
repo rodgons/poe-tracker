@@ -14,6 +14,7 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewWindow,
 };
 
+mod clientlog;
 mod foreground;
 mod keys;
 #[cfg(target_os = "macos")]
@@ -27,6 +28,23 @@ struct App {
     saved: store::Saved,
     /// a build loaded in the Setup window but not saved yet, with what was pasted
     pending: Option<(String, pob::Build)>,
+    /// the Client.txt being followed, if one was found
+    watching: Option<PathBuf>,
+    /// the character the last level-up line named
+    playing: Option<String>,
+}
+
+impl App {
+    /// Ticking pauses while the log shows a different character playing.
+    fn paused_for(&self) -> Option<&str> {
+        let playing = self.playing.as_deref()?;
+        let chosen = self.saved.character.as_str();
+        (!chosen.is_empty() && !playing.eq_ignore_ascii_case(chosen)).then_some(playing)
+    }
+
+    fn log_path(&self) -> Option<PathBuf> {
+        self.saved.log_path.clone().or_else(clientlog::find)
+    }
 }
 
 type AppState = Mutex<App>;
@@ -52,6 +70,8 @@ struct Setup {
     taken: usize,
     specs: Vec<SpecChoice>,
     tree_version: String,
+    /// the Client.txt being followed; None when none was found
+    log_path: Option<String>,
 }
 
 pub enum Msg {
@@ -184,11 +204,92 @@ fn spec_choices(build: &pob::Build) -> Vec<SpecChoice> {
         .collect()
 }
 
-fn panel_view_of(saved: &store::Saved) -> Option<tree::PanelView> {
+fn panel_view_of(app: &App) -> Option<tree::PanelView> {
+    let saved = &app.saved;
     let spec = saved.build.as_ref()?.specs.get(saved.spec)?;
     let plan = tree::Plan::new(tree::tree(), spec).ok()?;
     let allocated: HashSet<u32> = saved.allocated.iter().copied().collect();
-    Some(plan.view(tree::tree(), &allocated, saved.points))
+    let mut view = plan.view(tree::tree(), &allocated, saved.points);
+    if let Some(other) = app.paused_for() {
+        view.notices.insert(0, format!("Playing {other}? Ticking paused (Re-sync character to resume)"));
+    } else if app.watching.is_none() {
+        view.notices.push("Client.txt not found: points won't tick. Pick it in Set up build…".into());
+    }
+    Some(view)
+}
+
+/// Applies one Client.txt line to the Allocated nodes, then saves and redraws.
+fn on_log_line(handle: &AppHandle, line: &str) {
+    let Some(event) = clientlog::parse(line) else { return };
+    let state = handle.state::<AppState>();
+    let mut guard = state.lock().unwrap();
+    let app = &mut *guard;
+    let t = tree::tree();
+    let changed = match event {
+        clientlog::Event::LevelUp { character, .. } => {
+            let changed = app.playing.as_deref() != Some(character.as_str());
+            app.playing = Some(character);
+            changed
+        }
+        _ if app.paused_for().is_some() => false,
+        clientlog::Event::Allocated { id, name } => {
+            let Some(build) = app.saved.build.as_ref() else { return };
+            let Some(Ok(plan)) = build.specs.get(app.saved.spec).map(|s| tree::Plan::new(t, s)) else { return };
+            let have: HashSet<u32> = app.saved.allocated.iter().copied().collect();
+            match t.node_for_log(&id, &name, plan.order(t, &have)) {
+                // nodes outside the main tree (ascendancy, cluster jewels) are left out
+                Some(hash) if t.nodes.contains_key(&hash) && !have.contains(&hash) => {
+                    app.saved.allocated.push(hash);
+                    true
+                }
+                _ => false,
+            }
+        }
+        clientlog::Event::Unallocated { id, name } => {
+            let have = app.saved.allocated.clone();
+            match t.node_for_log(&id, &name, have) {
+                Some(hash) => {
+                    let before = app.saved.allocated.len();
+                    app.saved.allocated.retain(|n| *n != hash);
+                    app.saved.allocated.len() != before
+                }
+                None => false,
+            }
+        }
+    };
+    if changed {
+        let _ = store::save(&app.path, &app.saved);
+        let _ = handle.emit_to("corner", "plan", panel_view_of(app));
+    }
+}
+
+/// Follows Client.txt for the app's lifetime, switching files when the player picks another.
+fn follow_log(handle: AppHandle) {
+    loop {
+        let path = handle.state::<AppState>().lock().unwrap().log_path();
+        {
+            let state = handle.state::<AppState>();
+            let mut app = state.lock().unwrap();
+            if app.watching != path {
+                app.watching = path.clone();
+                let _ = handle.emit_to("corner", "plan", panel_view_of(&app));
+            }
+        }
+        let Some(path) = path else {
+            std::thread::sleep(Duration::from_secs(3));
+            continue;
+        };
+        let watched = path.clone();
+        clientlog::follow(
+            &path,
+            |line| on_log_line(&handle, line),
+            || {
+                let app = handle.state::<AppState>();
+                let app = app.lock().unwrap();
+                app.saved.log_path.as_ref().is_none_or(|p| *p == watched) && watched.is_file()
+            },
+        );
+    }
 }
 
 #[tauri::command]
@@ -224,7 +325,20 @@ fn current_setup(state: State<'_, AppState>) -> Setup {
         taken: saved.allocated.len().saturating_sub(1),
         specs: saved.build.as_ref().map(spec_choices).unwrap_or_default(),
         tree_version: tree::tree().version.clone(),
+        log_path: app.watching.clone().or_else(|| app.log_path()).map(|p| p.display().to_string()),
     }
+}
+
+/// Lets the player pick Client.txt when it isn't in a usual install folder.
+#[tauri::command]
+async fn choose_log(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = app.dialog().file().set_title("Find Path of Exile's Client.txt").blocking_pick_file();
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    let mut guard = state.lock().unwrap();
+    guard.saved.log_path = Some(path.clone());
+    store::save(&guard.path, &guard.saved)?;
+    Ok(Some(path.display().to_string()))
 }
 
 #[tauri::command]
@@ -248,8 +362,10 @@ fn save_setup(
     st.saved.spec = spec;
     st.saved.character = character.trim().to_string();
     st.saved.allocated = allocated;
+    // saving (or re-syncing) says the Character is the one playing
+    st.playing = None;
     store::save(&st.path, &st.saved)?;
-    let _ = app.emit_to("corner", "plan", panel_view_of(&st.saved));
+    let _ = app.emit_to("corner", "plan", panel_view_of(st));
     if let Some(win) = app.get_webview_window("setup") {
         let _ = win.hide();
     }
@@ -258,7 +374,7 @@ fn save_setup(
 
 #[tauri::command]
 fn panel_view(state: State<'_, AppState>) -> Option<tree::PanelView> {
-    panel_view_of(&state.lock().unwrap().saved)
+    panel_view_of(&state.lock().unwrap())
 }
 
 fn open_setup(app: &AppHandle) {
@@ -292,19 +408,21 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             initial_status,
             load_build,
             spec_order,
             current_setup,
             save_setup,
-            panel_view
+            panel_view,
+            choose_log
         ])
         .setup(|app| {
             let path = store::path(app.path().app_config_dir()?);
             let saved = store::load(&path);
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None }));
 
             #[cfg(target_os = "macos")]
             {
@@ -334,16 +452,18 @@ pub fn run() {
             let tray_tx = tx.clone();
             let panel_item = MenuItem::with_id(app, "panel", "Show/Hide panel", true, None::<&str>)?;
             let setup_item = MenuItem::with_id(app, "setup", "Set up build…", true, None::<&str>)?;
+            // re-running the hand Seed until the character import lands (v0.3)
+            let resync_item = MenuItem::with_id(app, "resync", "Re-sync character…", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit POE Tracker", true, None::<&str>)?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("POE Tracker")
-                .menu(&Menu::with_items(app, &[&panel_item, &setup_item, &quit])?)
+                .menu(&Menu::with_items(app, &[&panel_item, &setup_item, &resync_item, &quit])?)
                 .on_menu_event(move |app, e| match e.id().as_ref() {
                     "panel" => {
                         let _ = tray_tx.send(Msg::TogglePanel);
                     }
-                    "setup" => open_setup(app),
+                    "setup" | "resync" => open_setup(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -356,6 +476,8 @@ pub fn run() {
             std::thread::spawn(move || poll_frontmost(tx));
             let handle = app.handle().clone();
             std::thread::spawn(move || run_toggle_loop(handle, rx));
+            let handle = app.handle().clone();
+            std::thread::spawn(move || follow_log(handle));
             Ok(())
         })
         .run(tauri::generate_context!())
