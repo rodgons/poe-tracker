@@ -44,8 +44,11 @@
   // zoom steps over the whole-spec view, centred on the next points
   const ZOOMS = [1, 1.6, 2.5, 4]
   let zoom = 0
+  // where the zoomed view is centred; null follows the Next points
+  let center = null
   try { zoom = Math.min(ZOOMS.length - 1, Math.max(0, Number(localStorage.getItem('zoom')) || 0)) } catch {}
 
+  let frame = null
   function tree(v, width) {
     const by = Object.fromEntries(v.nodes.map(n => [n.id, n]))
     const mine = v.nodes.filter(n => n.s !== 'other'), pad = 160
@@ -56,11 +59,13 @@
     if (h < w * ratio) { y0 -= (w * ratio - h) / 2; h = w * ratio } else { x0 -= (h / ratio - w) / 2; w = h / ratio }
     if (zoom) {
       const focus = v.nodes.filter(n => n.s === 'next').length ? v.nodes.filter(n => n.s === 'next') : mine
-      const cx = focus.reduce((a, n) => a + n.x, 0) / focus.length, cy = focus.reduce((a, n) => a + n.y, 0) / focus.length
+      const [cx, cy] = center ?? [focus.reduce((a, n) => a + n.x, 0) / focus.length, focus.reduce((a, n) => a + n.y, 0) / focus.length]
       const zw = w / ZOOMS[zoom], zh = h / ZOOMS[zoom]
       // stay inside the whole-spec frame
       x0 = Math.min(Math.max(cx - zw / 2, x0), x0 + w - zw); y0 = Math.min(Math.max(cy - zh / 2, y0), y0 + h - zh)
       w = zw; h = zh
+      if (center) center = [x0 + w / 2, y0 + h / 2]
+      frame = { cx: x0 + w / 2, cy: y0 + h / 2, w, h }
     }
     const u = w / width
     let g = ''
@@ -101,7 +106,7 @@
       <div class="hd"><h1>${esc(v.spec)}</h1><span>${v.done} / ${v.total}</span></div>
       <div class="bar"><i style="width:${v.total ? 100 * v.done / v.total : 0}%"></i></div>
       ${tree(v, 392)}
-      <div class="meta">${legend}${refunds}${v.notices.map(n => `<span>${esc(n)}</span>`).join('')}${warn}<span class="keys">⌥P hide · ⌥= ⌥− zoom · ⌥0 whole spec</span></div>`
+      <div class="meta">${legend}${refunds}${v.notices.map(n => `<span>${esc(n)}</span>`).join('')}${warn}<span class="keys">⌥P hide · ⌥= ⌥− zoom · ⌥←↑↓→ move · ⌥0 whole spec</span></div>`
   }
 
   let view = null
@@ -111,7 +116,15 @@
   listen('plan', e => { view = e.payload; render(view) })
   listen('zoom', e => {
     zoom = e.payload === 0 ? 0 : Math.min(ZOOMS.length - 1, Math.max(0, zoom + e.payload))
+    if (!zoom) center = null
     try { localStorage.setItem('zoom', zoom) } catch {}
+    render(view)
+  })
+  listen('pan', e => {
+    if (!zoom || !frame) return
+    const [dx, dy] = e.payload
+    // a third of the view per press
+    center = [frame.cx + dx * frame.w / 3, frame.cy + dy * frame.h / 3]
     render(view)
   })
 </script>
