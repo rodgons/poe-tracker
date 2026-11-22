@@ -36,6 +36,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils libxtst-dev libxi-dev
       - run: npm ci
+      - if: matrix.platform == 'macos-latest'
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,6 +1,6 @@
 [package]
 name = "poe-tracker"
-version = "0.0.2"
+version = "0.1.0"
 edition = "2021"
 
 [lib]
@@ -13,6 +13,13 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# build codes: URL-safe base64 of zlib-compressed XML
+base64 = "0.22"
+flate2 = "1"
+roxmltree = "0.20"
+# fetching pobb.in / pastebin links (no CORS from the webview)
+ureq = "2"
 # Listen-only global key hook. Crates.io release is from 2023; main has the
 # macOS off-main-thread fix (set_is_main_thread). See docs/research/tauri-platform.md.
 rdev = { git = "https://github.com/Narsil/rdev", rev = "b7e201bf80be7b9632207366f277d29fe732b9c1", features = ["x11"] }

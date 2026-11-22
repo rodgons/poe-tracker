@@ -4,46 +4,98 @@
 <meta charset="utf-8">
 <title>POE Tracker</title>
 <style>
-  html, body { margin: 0; background: transparent; }
-  .panel {
-    margin: 4px; padding: 12px 14px; border-radius: 10px;
-    background: rgba(22, 20, 18, 0.88); border: 1px solid #e8d95a;
-    color: #e9dfcf; font: 13px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+  /* Corner panel: the whole tree spec, the next points numbered (variant D of the prototype). */
+  :root {
+    --scene: #14110e; --scene2: #231d17; --ink: #ece3d2; --dim: #a39581; --faint: #4c4238;
+    --alloc: #e3c46a; --next: #5fd3c4; --plan: #8a7a63; --other: #352d25; --refund: #e0806f;
+    --panel: rgba(18, 15, 12, .92); --edge: #6b5a3e;
+    --display: "Cinzel", "Trajan Pro", Georgia, serif;
+    --body: -apple-system, "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, Menlo, Consolas, monospace;
   }
-  h1 { margin: 0 0 6px; font-size: 15px; color: #e8d95a; }
-  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
-  dt { color: #a39581; }
-  dd { margin: 0; }
-  .bad { color: #f08a80; }
-  p { margin: 8px 0 0; color: #a39581; font-size: 12px; }
+  html, body { margin: 0; background: transparent; color: var(--ink); font-family: var(--body); }
+  .panel {
+    margin: 8px; padding: 12px 14px; border-radius: 8px; background: var(--panel);
+    border: 1px solid var(--edge); display: flex; flex-direction: column; gap: 10px;
+  }
+  .hd { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .hd h1 { margin: 0; font: 600 13px/1.2 var(--display); letter-spacing: .06em; color: var(--alloc); }
+  .hd span { font: 500 11px var(--mono); color: var(--dim); white-space: nowrap; }
+  .bar { height: 4px; background: var(--faint); border-radius: 2px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--alloc); }
+  svg { display: block; width: 100%; height: auto; }
+  .meta { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--dim); }
+  .meta .refund { color: var(--refund); }
+  .meta .warn { color: var(--refund); }
+  .empty { font-size: 12.5px; line-height: 1.5; color: var(--dim); }
+  .empty b { color: var(--alloc); }
 </style>
 </head>
 <body>
-<div class="panel">
-  <h1>POE Tracker · hello</h1>
-  <dl>
-    <dt>Last key</dt><dd id="key">–</dd>
-    <dt>Presses seen</dt><dd id="presses">0</dd>
-    <dt>Permission</dt><dd id="permission">–</dd>
-    <dt>Frontmost</dt><dd id="frontmost">–</dd>
-  </dl>
-  <p>⌥/Alt+P toggles this panel while in Path of Exile · Esc hides it · Quit from the tray / menu bar icon</p>
-</div>
+<div class="panel" id="panel"><p class="empty">Loading…</p></div>
 <script>
   const { invoke } = window.__TAURI__.core
   const { listen } = window.__TAURI__.event
-  function render(s) {
-    document.getElementById('key').textContent = s.key
-    document.getElementById('presses').textContent = s.presses
-    const p = document.getElementById('permission')
-    p.textContent = s.permission
-    p.className = s.permission.includes('NOT') ? 'bad' : ''
-    const f = document.getElementById('frontmost')
-    f.textContent = (s.in_poe ? '✓ ' : '') + s.frontmost
-    f.className = s.in_poe ? '' : 'bad'
+  const R = { small: 46, notable: 78, keystone: 110, mastery: 64, jewel: 70, start: 120 }
+  const col = { alloc: 'var(--alloc)', next: 'var(--next)', plan: 'var(--plan)', other: 'var(--other)' }
+  const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+  let permission = ''
+
+  function tree(v, width) {
+    const by = Object.fromEntries(v.nodes.map(n => [n.id, n]))
+    const mine = v.nodes.filter(n => n.s !== 'other'), pad = 160
+    let x0 = Math.min(...mine.map(n => n.x)) - pad, y0 = Math.min(...mine.map(n => n.y)) - pad
+    let w = Math.max(...mine.map(n => n.x)) - x0 + pad, h = Math.max(...mine.map(n => n.y)) - y0 + pad
+    // a steady 0.72 aspect, so the panel keeps its size between specs
+    const ratio = 0.72
+    if (h < w * ratio) { y0 -= (w * ratio - h) / 2; h = w * ratio } else { x0 -= (h / ratio - w) / 2; w = h / ratio }
+    const u = w / width
+    let g = ''
+    for (const [a, b] of v.edges) {
+      const A = by[a], B = by[b]
+      const s = A.s === 'alloc' && B.s === 'alloc' ? 'alloc'
+        : A.s !== 'other' && B.s !== 'other' && (A.s === 'next' || B.s === 'next') ? 'next'
+        : A.s !== 'other' && B.s !== 'other' ? 'plan' : 'other'
+      const dash = s === 'plan' ? `stroke-dasharray="${4 * u} ${3 * u}"` : ''
+      g += `<line x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" stroke="${col[s]}" stroke-width="${(s === 'other' ? 1 : s === 'plan' ? 1.4 : 2.4) * u}" ${dash}/>`
+    }
+    for (const n of v.nodes) {
+      const r = R[n.k] * (n.s === 'other' ? .7 : 1)
+      const fill = n.s === 'alloc' ? 'var(--alloc)' : n.s === 'next' ? 'var(--scene)' : 'var(--scene2)'
+      const attrs = `fill="${fill}" stroke="${col[n.s]}" stroke-width="${(n.s === 'next' ? 2.4 : 1.4) * u}"`
+      g += n.k === 'mastery'
+        ? `<rect x="${n.x - r}" y="${n.y - r}" width="${2 * r}" height="${2 * r}" transform="rotate(45 ${n.x} ${n.y})" ${attrs}/>`
+        : `<circle cx="${n.x}" cy="${n.y}" r="${r}" ${attrs}/>`
+      if (n.i) g += `<circle cx="${n.x}" cy="${n.y}" r="${9.5 * u}" fill="var(--next)"/><text x="${n.x}" y="${n.y + 3.8 * u}" font-size="${11 * u}" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-weight="500" fill="var(--scene)">${n.i}</text>`
+      const named = n.s === 'next' || (n.k !== 'small' && n.k !== 'start' && n.k !== 'mastery' && n.s !== 'other')
+      if (named) g += `<text x="${n.x}" y="${n.y - r - 5 * u}" font-size="${10 * u}" text-anchor="middle" fill="${n.s === 'next' ? 'var(--next)' : n.s === 'alloc' ? 'var(--alloc)' : 'var(--dim)'}" font-weight="${n.s === 'next' ? 600 : 400}">${esc(n.n.split(' → ')[0])}</text>`
+    }
+    return `<svg viewBox="${x0} ${y0} ${w} ${h}" role="img" aria-label="Mini passive tree">${g}</svg>`
   }
-  invoke('initial_status').then(render)
-  listen('status', e => render(e.payload))
+
+  function render(v) {
+    const panel = document.getElementById('panel')
+    const warn = permission.includes('NOT') ? `<span class="warn">⚠ ${esc(permission)}: the hotkey won't work. Allow POE Tracker in System Settings → Privacy &amp; Security → Input Monitoring.</span>` : ''
+    if (!v) {
+      panel.innerHTML = `<p class="empty"><b>No build yet.</b> Open <b>Set up build…</b> from the POE Tracker menu bar / tray icon.</p><div class="meta">${warn}</div>`
+      return
+    }
+    const refunds = v.refunds.length ? `<span class="refund">Refund: ${v.refunds.map(esc).join(', ')}</span>` : '<span>Refund: none</span>'
+    const legend = v.next.length
+      ? `<span><span style="color:var(--next)">●</span> next ${v.next.length} numbered · gold = taken · dashed = later</span>`
+      : '<span style="color:var(--alloc)">Spec complete</span>'
+    panel.innerHTML = `
+      <div class="hd"><h1>${esc(v.spec)}</h1><span>${v.done} / ${v.total}</span></div>
+      <div class="bar"><i style="width:${v.total ? 100 * v.done / v.total : 0}%"></i></div>
+      ${tree(v, 392)}
+      <div class="meta">${legend}${refunds}${v.notices.map(n => `<span>${esc(n)}</span>`).join('')}${warn}</div>`
+  }
+
+  let view = null
+  invoke('initial_status').then(s => { permission = s.permission; render(view) })
+  listen('status', e => { permission = e.payload.permission })
+  invoke('panel_view').then(v => { view = v; render(view) })
+  listen('plan', e => { view = e.payload; render(view) })
 </script>
 </body>
 </html>
