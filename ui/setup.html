@@ -84,6 +84,8 @@
   const $ = id => document.getElementById(id)
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
   let order = []
+  // a build loaded here and not saved yet: what the window shows wins over what's saved
+  let loadedHere = false
 
   function showSpecs(specs, chosen) {
     $('spec').innerHTML = specs.map((s, i) => `<option value="${i}">${s.title.replace(/</g, '&lt;')} · ${s.points} points</option>`).join('')
@@ -114,6 +116,7 @@
       const b = await invoke('load_build', { input: $('input').value })
       $('loaded').textContent = `${b.specs.length} tree specs`
       $('taken').value = 0
+      loadedHere = true
       await showSpecs(b.specs, b.active)
     } catch (e) {
       $('loaded').textContent = ''; $('loadErr').textContent = e
@@ -186,6 +189,7 @@
         character: $('character').value,
         taken: importing ? null : Math.max(0, Math.min(order.length, Number($('taken').value) || 0)),
       })
+      loadedHere = false
     } catch (e) {
       $('saveErr').textContent = importing && !String(e).includes('by hand') ? `${e} Or set the points by hand.` : e
     } finally {
@@ -200,6 +204,16 @@
   $('chooseLog').onclick = async () => {
     try { const p = await invoke('choose_log'); if (p) showLog(p) } catch (e) { $('saveErr').textContent = e }
   }
+
+  // the window stays loaded while hidden: keep the saved spec and taken count current
+  // (a spec picked in the Build window, points ticked in game), or saving again would undo them
+  window.__TAURI__.event.listen('plan', async () => {
+    if (loadedHere) return
+    const s = await invoke('current_setup')
+    if (!s.specs.length) return
+    if (document.activeElement !== $('taken')) $('taken').value = s.taken
+    if (Number($('spec').value) !== s.spec) { $('spec').value = String(s.spec); await loadOrder() } else hint()
+  })
 
   window.__TAURI__.event.listen('resync_error', e => { setSeed('import'); $('saveErr').textContent = e.payload })
 

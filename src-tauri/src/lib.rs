@@ -448,19 +448,26 @@ async fn save_setup(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (account, character) = (account.trim().to_string(), character.trim().to_string());
-    let chosen = {
+    let (chosen, kept) = {
         let st = state.lock().unwrap();
         let build = st.pending.as_ref().map(|(_, b)| b).or(st.saved.build.as_ref()).ok_or("Load a build first.")?;
-        build.specs.get(spec).ok_or("Pick a tree spec.")?.clone()
+        // re-saving the same spec with the taken count as it stands (say, to fix the
+        // character name) keeps the exact points, not the first ones in order
+        let unchanged = st.pending.is_none()
+            && spec == st.saved.spec
+            && taken.is_some()
+            && taken == panel_view_of(&st).map(|v| v.done);
+        (build.specs.get(spec).ok_or("Pick a tree spec.")?.clone(), unchanged.then(|| st.saved.allocated.clone()))
     };
-    let allocated = match taken {
-        Some(taken) => {
+    let allocated = match (kept, taken) {
+        (Some(kept), _) => kept,
+        (None, Some(taken)) => {
             let plan = tree::Plan::new(tree::tree(), &chosen)?;
             let mut allocated: Vec<u32> = plan.seed(tree::tree(), taken).into_iter().collect();
             allocated.sort_unstable();
             allocated
         }
-        None => {
+        (None, None) => {
             let (a, c) = (account.clone(), character.clone());
             tauri::async_runtime::spawn_blocking(move || import_allocated(&a, &c, &chosen))
                 .await
