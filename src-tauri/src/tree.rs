@@ -77,6 +77,16 @@ pub struct DrawnNode {
     s: &'static str,
     /// position in the Next points, 1-based; 0 when not next
     i: usize,
+    /// the node's stats (a mastery's chosen effect), for hover details
+    d: Vec<String>,
+}
+
+/// One point of the Tree spec in the Build window's list.
+#[derive(Clone, Serialize)]
+pub struct ListedPoint {
+    id: u32,
+    name: String,
+    taken: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -203,6 +213,29 @@ impl Plan {
         have
     }
 
+    /// Every point of the spec: the taken ones first, then the rest in the order to take them.
+    pub fn points(&self, tree: &Tree, allocated: &HashSet<u32>) -> Vec<ListedPoint> {
+        let listed = |id: u32, taken| ListedPoint { id, name: self.label(tree, id), taken };
+        let mut taken: Vec<u32> = self.order(tree, &HashSet::new()).into_iter().filter(|n| allocated.contains(n)).collect();
+        // taken points the from-scratch order skips (it only lists what's reachable)
+        let mut rest: Vec<u32> = self.nodes.iter().copied().filter(|n| allocated.contains(n) && !taken.contains(n)).collect();
+        rest.sort_unstable();
+        taken.extend(rest);
+        taken
+            .into_iter()
+            .map(|id| listed(id, true))
+            .chain(self.order(tree, allocated).into_iter().map(|id| listed(id, false)))
+            .collect()
+    }
+
+    fn details(&self, tree: &Tree, id: u32) -> Vec<String> {
+        let node = &tree.nodes[&id];
+        match self.masteries.get(&id).and_then(|e| node.masteries.get(&e.to_string())) {
+            Some(stats) => stats.clone(),
+            None => node.stats.clone(),
+        }
+    }
+
     fn label(&self, tree: &Tree, id: u32) -> String {
         let node = &tree.nodes[&id];
         match self.masteries.get(&id).and_then(|e| node.masteries.get(&e.to_string())) {
@@ -247,6 +280,7 @@ impl Plan {
                 n: self.label(tree, id),
                 s: state,
                 i: next.iter().position(|n| *n == id).map_or(0, |p| p + 1),
+                d: self.details(tree, id),
             });
         }
         let mut edges: Vec<(u32, u32)> = shown
@@ -367,6 +401,18 @@ mod tests {
         let view = plan.view(t, &have, 5);
         assert_eq!(view.done, 4);
         assert_eq!(view.refunds, vec![t.nodes[&stray].name.clone()]);
+    }
+
+    #[test]
+    fn lists_taken_points_then_the_rest_in_order() {
+        let t = tree();
+        let plan = lvl_01_30();
+        let have = plan.seed(t, 10);
+        let points = plan.points(t, &have);
+        assert_eq!(points.len(), plan.nodes.len());
+        assert!(points[..10].iter().all(|p| p.taken));
+        assert!(points[10..].iter().all(|p| !p.taken));
+        assert_eq!(points[10].id, plan.order(t, &have)[0]);
     }
 
     #[test]

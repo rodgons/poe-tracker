@@ -97,3 +97,14 @@ pub fn activate() {
         let _: () = msg_send![app, activateIgnoringOtherApps: true];
     }
 }
+
+/// Shows the Dock icon while the Build window is open (a regular app), and hides
+/// it again after (an accessory app).
+pub fn set_dock_icon(shown: bool) {
+    unsafe {
+        let app: *mut AnyObject = msg_send![objc2::class!(NSApplication), sharedApplication];
+        // NSApplicationActivationPolicyRegular = 0, Accessory = 1
+        let policy: isize = if shown { 0 } else { 1 };
+        let _: bool = msg_send![app, setActivationPolicy: policy];
+    }
+}

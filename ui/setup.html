@@ -48,6 +48,7 @@
 </head>
 <body>
 <h1>Set up build</h1>
+<p class="err" id="permission" hidden>⚠ Input Monitoring is off, so ⌥P can't show the panel. Allow POE Tracker in System Settings → Privacy &amp; Security → Input Monitoring, then reopen the app.</p>
 
 <section>
   <label for="input">Path of Building build <small>(export code, pobb.in or pastebin link)</small></label>
@@ -193,6 +194,8 @@
   }
 
   window.__TAURI__.event.listen('resync_error', e => { setSeed('import'); $('saveErr').textContent = e.payload })
+
+  invoke('initial_status').then(s => { $('permission').hidden = !s.permission.includes('NOT') })
 
   invoke('current_setup').then(s => {
     showLog(s.log_path)
