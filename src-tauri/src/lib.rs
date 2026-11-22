@@ -57,6 +57,10 @@ struct Setup {
 pub enum Msg {
     Hotkey,
     Esc,
+    /// +1 in, -1 out, 0 back to the whole spec
+    Zoom(i8),
+    /// the tray's Show/Hide panel item
+    TogglePanel,
     Frontmost(String),
 }
 
@@ -110,14 +114,20 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
     for msg in rx {
         let in_poe = foreground::is_poe(&frontmost);
         match msg {
-            Msg::Hotkey if in_poe => {
+            // showing needs the game in front; hiding works from anywhere
+            Msg::Hotkey if in_poe || visible => {
                 presses += 1;
                 key = "⌥/Alt+P";
                 visible = !visible;
             }
-            Msg::Esc if in_poe && visible => {
+            Msg::Esc if visible => {
                 key = "Esc";
                 visible = false;
+            }
+            Msg::TogglePanel => visible = !visible,
+            Msg::Zoom(step) if visible => {
+                let _ = app.emit_to("corner", "zoom", step);
+                continue;
             }
             Msg::Frontmost(name) => {
                 if name == frontmost {
@@ -314,13 +324,19 @@ pub fn run() {
                 });
             }
 
+            let (tx, rx) = mpsc::channel();
+            let tray_tx = tx.clone();
+            let panel_item = MenuItem::with_id(app, "panel", "Show/Hide panel", true, None::<&str>)?;
             let setup_item = MenuItem::with_id(app, "setup", "Set up build…", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit POE Tracker", true, None::<&str>)?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("POE Tracker")
-                .menu(&Menu::with_items(app, &[&setup_item, &quit])?)
-                .on_menu_event(|app, e| match e.id().as_ref() {
+                .menu(&Menu::with_items(app, &[&panel_item, &setup_item, &quit])?)
+                .on_menu_event(move |app, e| match e.id().as_ref() {
+                    "panel" => {
+                        let _ = tray_tx.send(Msg::TogglePanel);
+                    }
                     "setup" => open_setup(app),
                     "quit" => app.exit(0),
                     _ => {}
@@ -330,7 +346,6 @@ pub fn run() {
                 open_setup(app.handle());
             }
 
-            let (tx, rx) = mpsc::channel();
             keys::spawn(tx.clone());
             std::thread::spawn(move || poll_frontmost(tx));
             let handle = app.handle().clone();

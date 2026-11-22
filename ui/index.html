@@ -27,6 +27,7 @@
   .meta { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--dim); }
   .meta .refund { color: var(--refund); }
   .meta .warn { color: var(--refund); }
+  .meta .keys { color: var(--faint); }
   .empty { font-size: 12.5px; line-height: 1.5; color: var(--dim); }
   .empty b { color: var(--alloc); }
 </style>
@@ -40,6 +41,10 @@
   const col = { alloc: 'var(--alloc)', next: 'var(--next)', plan: 'var(--plan)', other: 'var(--other)' }
   const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
   let permission = ''
+  // zoom steps over the whole-spec view, centred on the next points
+  const ZOOMS = [1, 1.6, 2.5, 4]
+  let zoom = 0
+  try { zoom = Math.min(ZOOMS.length - 1, Math.max(0, Number(localStorage.getItem('zoom')) || 0)) } catch {}
 
   function tree(v, width) {
     const by = Object.fromEntries(v.nodes.map(n => [n.id, n]))
@@ -49,6 +54,14 @@
     // a steady 0.72 aspect, so the panel keeps its size between specs
     const ratio = 0.72
     if (h < w * ratio) { y0 -= (w * ratio - h) / 2; h = w * ratio } else { x0 -= (h / ratio - w) / 2; w = h / ratio }
+    if (zoom) {
+      const focus = v.nodes.filter(n => n.s === 'next').length ? v.nodes.filter(n => n.s === 'next') : mine
+      const cx = focus.reduce((a, n) => a + n.x, 0) / focus.length, cy = focus.reduce((a, n) => a + n.y, 0) / focus.length
+      const zw = w / ZOOMS[zoom], zh = h / ZOOMS[zoom]
+      // stay inside the whole-spec frame
+      x0 = Math.min(Math.max(cx - zw / 2, x0), x0 + w - zw); y0 = Math.min(Math.max(cy - zh / 2, y0), y0 + h - zh)
+      w = zw; h = zh
+    }
     const u = w / width
     let g = ''
     for (const [a, b] of v.edges) {
@@ -82,13 +95,13 @@
     }
     const refunds = v.refunds.length ? `<span class="refund">Refund: ${v.refunds.map(esc).join(', ')}</span>` : '<span>Refund: none</span>'
     const legend = v.next.length
-      ? `<span><span style="color:var(--next)">●</span> next ${v.next.length} numbered · gold = taken · dashed = later</span>`
+      ? `<span><span style="color:var(--next)">●</span> next ${v.next.length} numbered · gold = taken · dashed = later${zoom ? ` · ×${ZOOMS[zoom]}` : ''}</span>`
       : '<span style="color:var(--alloc)">Spec complete</span>'
     panel.innerHTML = `
       <div class="hd"><h1>${esc(v.spec)}</h1><span>${v.done} / ${v.total}</span></div>
       <div class="bar"><i style="width:${v.total ? 100 * v.done / v.total : 0}%"></i></div>
       ${tree(v, 392)}
-      <div class="meta">${legend}${refunds}${v.notices.map(n => `<span>${esc(n)}</span>`).join('')}${warn}</div>`
+      <div class="meta">${legend}${refunds}${v.notices.map(n => `<span>${esc(n)}</span>`).join('')}${warn}<span class="keys">⌥P hide · ⌥= ⌥− zoom · ⌥0 whole spec</span></div>`
   }
 
   let view = null
@@ -96,6 +109,11 @@
   listen('status', e => { permission = e.payload.permission })
   invoke('panel_view').then(v => { view = v; render(view) })
   listen('plan', e => { view = e.payload; render(view) })
+  listen('zoom', e => {
+    zoom = e.payload === 0 ? 0 : Math.min(ZOOMS.length - 1, Math.max(0, zoom + e.payload))
+    try { localStorage.setItem('zoom', zoom) } catch {}
+    render(view)
+  })
 </script>
 </body>
 </html>
