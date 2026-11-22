@@ -14,11 +14,21 @@ pub struct Saved {
     pub allocated: Vec<u32>,
     /// how many Next points the panel shows
     pub points: usize,
+    /// Client.txt the player picked; None looks in the usual install folders
+    pub log_path: Option<PathBuf>,
 }
 
 impl Default for Saved {
     fn default() -> Self {
-        Saved { input: String::new(), build: None, spec: 0, character: String::new(), allocated: Vec::new(), points: 5 }
+        Saved {
+            input: String::new(),
+            build: None,
+            spec: 0,
+            character: String::new(),
+            allocated: Vec::new(),
+            points: 5,
+            log_path: None,
+        }
     }
 }
 

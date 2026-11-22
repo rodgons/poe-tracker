@@ -1,11 +1,15 @@
 # Slim the GGG skilltree-export data.json into the tree file the app bundles.
-# Usage: python3 scripts/extract_tree.py <data.json> <version> > src-tauri/data/tree.json
+# Usage: python3 scripts/extract_tree.py <data.json> <version> <RePoE Default.json> > src-tauri/data/tree.json
+#   data.json: grindinggear/skilltree-export at the <version> tag
+#   Default.json: RePoE passive_skill_trees/Default.json for the same patch, for the
+#   string ids Client.txt prints (life_regeneration1087 → 55906)
 # Keeps main-tree nodes only (no ascendancy, no proxies), with positions precomputed;
 # the other hashes are listed under 'skip'.
 import sys, json, math
 
 data = json.load(open(sys.argv[1]))
 version = sys.argv[2]
+repoe = json.load(open(sys.argv[3]))['passives']
 nodes = {k: v for k, v in data['nodes'].items() if k != 'root'}
 groups, C = data['groups'], data['constants']
 radii, per = C['orbitRadii'], C['skillsPerOrbit']
@@ -45,4 +49,5 @@ for k in sorted(main, key=int):
     out[k] = n
 # ascendancy and proxy hashes, so the app can tell them apart from nodes a patch removed
 skip = sorted(int(k) for k in nodes if k not in main)
-json.dump({'version': version, 'skip': skip, 'nodes': out}, sys.stdout, separators=(',', ':'), ensure_ascii=False)
+ids = {p['id']: p['hash'] for p in repoe.values() if str(p['hash']) in main}
+json.dump({'version': version, 'skip': skip, 'ids': ids, 'nodes': out}, sys.stdout, separators=(',', ':'), ensure_ascii=False)

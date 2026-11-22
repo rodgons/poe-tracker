@@ -6,7 +6,7 @@
 
 **Allocated node**: A passive tree node the player's character currently has.
 
-**Character**: The player's in-game character the app follows, chosen in setup. Every allocation in the Client log is credited to it.
+**Character**: The player's in-game character the app follows, chosen in setup. Every allocation in the Client log is credited to it, except while the log's latest level-up names a different character; then ticking pauses until the Character levels up again or the player re-syncs.
 
 **Seed**: The starting set of Allocated nodes for the Character, taken once at setup or on re-sync. Live allocations in the Client log change it from then on.
 
