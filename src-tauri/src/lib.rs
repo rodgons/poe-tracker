@@ -59,6 +59,8 @@ pub enum Msg {
     Esc,
     /// +1 in, -1 out, 0 back to the whole spec
     Zoom(i8),
+    /// move the zoomed Mini-tree view: (x, y) steps
+    Pan(i8, i8),
     /// the tray's Show/Hide panel item
     TogglePanel,
     Frontmost(String),
@@ -127,6 +129,10 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
             Msg::TogglePanel => visible = !visible,
             Msg::Zoom(step) if visible => {
                 let _ = app.emit_to("corner", "zoom", step);
+                continue;
+            }
+            Msg::Pan(dx, dy) if visible => {
+                let _ = app.emit_to("corner", "pan", (dx, dy));
                 continue;
             }
             Msg::Frontmost(name) => {

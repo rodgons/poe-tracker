@@ -1,5 +1,5 @@
 // Listen-only key hook: observes the panel hotkey (Alt/Option+P), the zoom keys
-// (Alt/Option + = - 0) and Esc, never consumes or simulates keys.
+// (Alt/Option + = - 0), panning (Alt/Option + arrows) and Esc, never consumes or simulates keys.
 use rdev::{listen, EventType, Key};
 use std::sync::mpsc::Sender;
 
@@ -18,7 +18,17 @@ pub fn spawn(tx: Sender<Msg>) {
             EventType::KeyPress(Key::Alt | Key::AltGr) => alt = true,
             EventType::KeyRelease(Key::Alt | Key::AltGr) => alt = false,
             EventType::KeyPress(
-                key @ (Key::KeyP | Key::Escape | Key::Equal | Key::KpPlus | Key::Minus | Key::KpMinus | Key::Num0),
+                key @ (Key::KeyP
+                | Key::Escape
+                | Key::Equal
+                | Key::KpPlus
+                | Key::Minus
+                | Key::KpMinus
+                | Key::Num0
+                | Key::LeftArrow
+                | Key::RightArrow
+                | Key::UpArrow
+                | Key::DownArrow),
             ) => {
                 if held == Some(key) {
                     return;
@@ -40,6 +50,18 @@ pub fn spawn(tx: Sender<Msg>) {
                     }
                     Key::Num0 if alt => {
                         let _ = tx.send(Msg::Zoom(0));
+                    }
+                    Key::LeftArrow if alt => {
+                        let _ = tx.send(Msg::Pan(-1, 0));
+                    }
+                    Key::RightArrow if alt => {
+                        let _ = tx.send(Msg::Pan(1, 0));
+                    }
+                    Key::UpArrow if alt => {
+                        let _ = tx.send(Msg::Pan(0, -1));
+                    }
+                    Key::DownArrow if alt => {
+                        let _ = tx.send(Msg::Pan(0, 1));
                     }
                     _ => {}
                 }
