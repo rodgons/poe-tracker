@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>POE Tracker</title>
+<style>
+  html, body { margin: 0; background: transparent; }
+  .panel {
+    margin: 4px; padding: 12px 14px; border-radius: 10px;
+    background: rgba(22, 20, 18, 0.88); border: 1px solid #e8d95a;
+    color: #e9dfcf; font: 13px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  h1 { margin: 0 0 6px; font-size: 15px; color: #e8d95a; }
+  dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
+  dt { color: #a39581; }
+  dd { margin: 0; }
+  .bad { color: #f08a80; }
+  p { margin: 8px 0 0; color: #a39581; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="panel">
+  <h1>POE Tracker · hello</h1>
+  <dl>
+    <dt>Last key</dt><dd id="key">–</dd>
+    <dt>Presses seen</dt><dd id="presses">0</dd>
+    <dt>Permission</dt><dd id="permission">–</dd>
+    <dt>Frontmost</dt><dd id="frontmost">–</dd>
+  </dl>
+  <p>⌥/Alt+P toggles this panel while in Path of Exile · Esc hides it · Quit from the tray / menu bar icon</p>
+</div>
+<script>
+  const { invoke } = window.__TAURI__.core
+  const { listen } = window.__TAURI__.event
+  function render(s) {
+    document.getElementById('key').textContent = s.key
+    document.getElementById('presses').textContent = s.presses
+    const p = document.getElementById('permission')
+    p.textContent = s.permission
+    p.className = s.permission.includes('NOT') ? 'bad' : ''
+    const f = document.getElementById('frontmost')
+    f.textContent = (s.in_poe ? '✓ ' : '') + s.frontmost
+    f.className = s.in_poe ? '' : 'bad'
+  }
+  invoke('initial_status').then(render)
+  listen('status', e => render(e.payload))
+</script>
+</body>
+</html>
