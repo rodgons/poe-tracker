@@ -165,6 +165,7 @@
   try { $('currentOnly').checked = localStorage.getItem('currentOnly') !== 'false' } catch {}
 
   $('find').onclick = async () => {
+    if (!$('account').value.trim()) { $('found').textContent = 'Type your account name first, like Name#1234.'; $('found').style.color = 'var(--bad)'; return }
     $('found').textContent = 'Looking…'; $('find').disabled = true
     try {
       chars = await invoke('find_characters', { account: $('account').value })
