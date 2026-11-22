@@ -16,9 +16,11 @@
 
 **Mini-tree**: A small drawing of the whole Tree spec, showing Allocated nodes, the numbered Next points and the spec's later points, with nearby nodes outside the spec dimmed for context. A picture beside the game, not aligned with the game's own tree.
 
-**Corner panel**: The small window in a screen corner that holds the Mini-tree, the Tree spec's progress and any Refunds. Toggled by the Panel hotkey while Path of Exile is the frontmost app.
+**Corner panel**: The small panel inside the game window (top-right unless the player drags it elsewhere) that holds the Mini-tree, the Tree spec's progress and any Refunds. Toggled by the Panel hotkey while Path of Exile is the frontmost app, and never shown outside the game. The player can zoom and move its Mini-tree with the mouse, but it never takes the keyboard from the game.
 
-**Setup window**: The ordinary app window where the player pastes their Build, picks the Tree spec and names their Character. Opened on first launch and from the tray menu, it is the only window the player clicks in; the Corner panel only shows things.
+**Setup window**: The ordinary app window where the player pastes their Build, picks the Tree spec and names their Character. Opened on first launch and from the tray menu.
+
+**Build window**: The ordinary app window for following the Build away from the game: the whole Tree spec large, every point in order, the Refunds, and the choice of current Tree spec. It shows the Character's progress but never changes which nodes are Allocated.
 
 **Panel hotkey**: The key combination (⌥/Alt+P) that toggles the Corner panel. Distinct from the game's own key for opening the passive tree, which the app ignores.
 
