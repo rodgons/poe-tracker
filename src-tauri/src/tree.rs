@@ -89,7 +89,7 @@ pub struct NextPoint {
 #[derive(Clone, Serialize)]
 pub struct PanelView {
     spec: String,
-    done: usize,
+    pub done: usize,
     total: usize,
     nodes: Vec<DrawnNode>,
     edges: Vec<(u32, u32)>,
