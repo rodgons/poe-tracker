@@ -43,6 +43,7 @@
   const { listen } = window.__TAURI__.event
   const esc = MiniTree.esc
   let permission = ''
+  const hotkey = navigator.userAgent.includes('Mac') ? '⌥P' : 'Alt+P'
   let cam = MiniTree.camera(1)
   try { cam = MiniTree.camera(Number(localStorage.getItem('zoom'))) } catch {}
   const keepZoom = () => { try { localStorage.setItem('zoom', cam.zoom) } catch {} }
@@ -62,7 +63,7 @@
       <div class="hd" title="Drag to move the panel"><h1>${esc(v.spec)}</h1><span>${v.done} / ${v.total}</span></div>
       <div class="bar"><i style="width:${v.total ? 100 * v.done / v.total : 0}%"></i></div>
       ${MiniTree.draw(v, 392, 0.72, cam)}
-      <div class="meta">${legend}${refunds}${v.notices.map(n => `<span>${esc(n)}</span>`).join('')}${warn}<span class="keys">⌥P hide · scroll to zoom, drag to move · drag the title to move the panel</span></div>`
+      <div class="meta">${legend}${refunds}${v.notices.map(n => `<span>${esc(n)}</span>`).join('')}${warn}<span class="keys">${hotkey} hide · scroll to zoom, drag to move · drag the title to move the panel</span></div>`
   }
 
   let view = null
@@ -85,20 +86,26 @@
   let moving = null
   panel.addEventListener('pointerdown', e => {
     if (e.button !== 0 || !e.target.closest('.hd')) return
-    moving = { x: e.screenX, y: e.screenY }
+    moving = { x: e.screenX, y: e.screenY, dx: 0, dy: 0 }
     panel.setPointerCapture(e.pointerId)
     invoke('drag_panel', { phase: 'start', dx: 0, dy: 0 })
   })
   panel.addEventListener('pointermove', e => {
-    if (moving) invoke('drag_panel', { phase: 'move', dx: e.screenX - moving.x, dy: e.screenY - moving.y })
+    if (!moving) return
+    moving.dx = e.screenX - moving.x; moving.dy = e.screenY - moving.y
+    invoke('drag_panel', { phase: 'move', dx: moving.dx, dy: moving.dy })
   })
+  // a drag that ends without a pointerup (capture lost) still ends, where it last was,
+  // or the app would think it's still dragging and stop placing the panel
   const endMove = e => {
     if (!moving) return
-    invoke('drag_panel', { phase: 'end', dx: e.screenX - moving.x, dy: e.screenY - moving.y })
+    if (e.type === 'pointerup') { moving.dx = e.screenX - moving.x; moving.dy = e.screenY - moving.y }
+    invoke('drag_panel', { phase: 'end', dx: moving.dx, dy: moving.dy })
     moving = null
   }
   panel.addEventListener('pointerup', endMove)
   panel.addEventListener('pointercancel', endMove)
+  panel.addEventListener('lostpointercapture', endMove)
 </script>
 </body>
 </html>

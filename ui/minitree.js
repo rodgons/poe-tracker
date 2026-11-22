@@ -57,6 +57,7 @@ const MiniTree = (() => {
    *  the zoomed view. `changed` redraws; `zoomed` is told the new zoom to remember it. */
   function attach(host, cam, changed, zoomed = () => {}) {
     let queued = false
+    const endDrag = () => { if (cam.drag) { cam.drag = null; redraw() } }
     const redraw = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; changed() }) } }
     // the point of the tree under the pointer, and where the pointer sits in the view (0–1)
     function under(e) {
@@ -89,12 +90,14 @@ const MiniTree = (() => {
     })
     host.addEventListener('pointermove', e => {
       if (!cam.drag) return
+      // the button came up somewhere we didn't hear it (the page redrew mid-drag)
+      if (!e.buttons) return endDrag()
       cam.center = [cam.drag.cx - (e.clientX - cam.drag.x) * cam.drag.scale, cam.drag.cy - (e.clientY - cam.drag.y) * cam.drag.scale]
       redraw()
     })
-    const endDrag = () => { if (cam.drag) { cam.drag = null; redraw() } }
     host.addEventListener('pointerup', endDrag)
     host.addEventListener('pointercancel', endDrag)
+    host.addEventListener('lostpointercapture', endDrag)
   }
 
   /** The ⌥ keys: +1 in, -1 out, 0 whole spec; pan moves a third of the view per press. */

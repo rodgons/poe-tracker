@@ -103,9 +103,9 @@
   function hint() {
     const n = Math.max(0, Math.min(order.length, Number($('taken').value) || 0))
     $('takenHint').innerHTML = n === 0
-      ? `Nothing yet. First point: <b>${order[0] ?? '—'}</b>`
+      ? `Nothing yet. First point: <b>${esc(order[0] ?? '—')}</b>`
       : n === order.length ? 'The whole spec is taken'
-      : `Up to ${order[n - 1]}. Next: <b>${order[n]}</b>`
+      : `Up to ${esc(order[n - 1])}. Next: <b>${esc(order[n])}</b>`
   }
 
   $('load').onclick = async () => {
@@ -131,9 +131,17 @@
     $('takenHint').style.opacity = how === 'hand' ? 1 : .45
   }
   document.querySelectorAll('input[name=seed]').forEach(r => r.onchange = () => setSeed(r.value))
-  $('account').oninput = () => { if ($('account').value.trim()) setSeed('import') }
-
   let chars = []
+  $('account').oninput = () => {
+    if ($('account').value.trim()) setSeed('import')
+    // another account's characters aren't this one's: back to typing a name
+    if (chars.length) {
+      chars = []
+      $('charPick').hidden = true; $('character').hidden = false; $('found').textContent = ''
+    }
+  }
+  $('account').onkeydown = e => { if (e.key === 'Enter') $('find').click() }
+
   $('charPick').onchange = () => { $('character').value = $('charPick').value }
   function showChars() {
     const current = chars.filter(c => c.current)

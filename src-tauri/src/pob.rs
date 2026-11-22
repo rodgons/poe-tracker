@@ -30,6 +30,7 @@ pub fn code_from_input(input: &str) -> Result<String, String> {
     };
     match raw_url {
         Some(url) => ureq::get(&url)
+            .timeout(crate::poeapi::TIMEOUT)
             .call()
             .map_err(|e| format!("Couldn't fetch the build link: {e}"))?
             .into_string()

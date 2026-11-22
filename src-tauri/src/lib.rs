@@ -51,8 +51,10 @@ impl App {
         (!chosen.is_empty() && !playing.eq_ignore_ascii_case(chosen)).then_some(playing)
     }
 
+    /// A picked file that's gone (game moved, drive unplugged) counts as not found,
+    /// so the log follower waits for it instead of spinning.
     fn log_path(&self) -> Option<PathBuf> {
-        self.saved.log_path.clone().or_else(clientlog::find)
+        self.saved.log_path.clone().or_else(clientlog::find).filter(|p| p.is_file())
     }
 }
 

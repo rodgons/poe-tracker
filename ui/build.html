@@ -94,16 +94,21 @@
       const kind = p.taken ? 'taken' : (++n <= v.next.length ? 'next' : 'later')
       return `<li class="${kind}" data-id="${p.id}"><b>${p.taken ? '✓' : n}</b><span>${esc(p.name)}</span></li>`
     }).join('')
-    const refunds = v.refunds.length
-      ? `<h2>Refund (${v.refunds.length})</h2><ol>${v.refunds.map(r => `<li class="refund"><b>✕</b><span>${esc(r)}</span></li>`).join('')}</ol>`
+    // the Refunds as drawn on the tree, so clicking one finds it like any point
+    const refunded = v.nodes.filter(x => x.s === 'refund').sort((a, b) => a.n.localeCompare(b.n))
+    const refunds = refunded.length
+      ? `<h2>Refund (${refunded.length})</h2><ol>${refunded.map(r => `<li class="refund" data-id="${r.id}"><b>✕</b><span>${esc(r.n)}</span></li>`).join('')}</ol>`
       : ''
     const notices = v.notices.map(t => `<p class="note">${esc(t)}</p>`).join('')
+    // a tick redraws everything: keep the list where the player scrolled it
+    const scrolled = document.querySelector('aside')?.scrollTop ?? 0
     $('main').innerHTML = `
       <div id="stage"><span id="hint">scroll to zoom · drag to move · click a point in the list to find it</span></div>
       <aside>${notices}${refunds}<h2>Points (${v.done} taken, ${v.total - v.done} to go)</h2><ol id="points">${items}</ol></aside>`
+    document.querySelector('aside').scrollTop = scrolled
     drawTree()
     MiniTree.attach($('stage'), cam, drawTree)
-    $('points').onclick = e => {
+    document.querySelector('aside').onclick = e => {
       const li = e.target.closest('li[data-id]')
       const node = li && v.nodes.find(x => x.id === Number(li.dataset.id))
       if (!node) return

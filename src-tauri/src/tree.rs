@@ -59,6 +59,9 @@ pub struct Plan {
     pub start: u32,
     /// spec nodes on the current tree, minus the class start
     pub nodes: HashSet<u32>,
+    /// spec sockets inside a large cluster socket: only a cluster jewel opens them,
+    /// so they're the spec's but never suggested or counted
+    cluster_sockets: HashSet<u32>,
     masteries: HashMap<u32, u32>,
     /// spec nodes the current tree doesn't have (removed or moved by a patch)
     pub missing: usize,
@@ -131,15 +134,26 @@ impl Plan {
                 missing += 1;
             }
         }
-        Ok(Plan {
+        let mut plan = Plan {
             title: spec.title.clone(),
             start,
             nodes,
+            cluster_sockets: HashSet::new(),
             masteries: spec.masteries.iter().copied().collect(),
             missing,
             clusters,
             tree_version: spec.tree_version.replace('_', "."),
-        })
+        };
+        // a socket no path of spec nodes leads to sits inside a cluster jewel
+        let reached: HashSet<u32> = plan.order(tree, &HashSet::new()).into_iter().collect();
+        let stranded: Vec<u32> =
+            plan.nodes.iter().copied().filter(|n| !reached.contains(n) && tree.nodes[n].kind == "jewel").collect();
+        for n in stranded {
+            plan.nodes.remove(&n);
+            plan.cluster_sockets.insert(n);
+            plan.clusters += 1;
+        }
+        Ok(plan)
     }
 
     /// The spec's remaining points in the order to take them: walk to the nearest
@@ -161,7 +175,7 @@ impl Plan {
     }
 
     fn is_mine(&self, id: u32) -> bool {
-        id == self.start || self.nodes.contains(&id)
+        id == self.start || self.nodes.contains(&id) || self.cluster_sockets.contains(&id)
     }
 
     fn path_to_nearest(&self, tree: &Tree, have: &HashSet<u32>, want: impl Fn(u32) -> bool) -> Option<Vec<u32>> {
@@ -434,5 +448,21 @@ mod tests {
         assert!(plan.clusters > 0);
         let view = plan.view(tree(), &plan.seed(tree(), 0), 5);
         assert!(view.notices.iter().any(|n| n.contains("cluster")));
+    }
+
+    #[test]
+    fn cluster_sockets_are_neither_counted_nor_refunds() {
+        let t = tree();
+        let build = crate::pob::decode(include_str!("../tests/pohx-rf.txt")).unwrap();
+        let plan = Plan::new(t, &build.specs[8]).unwrap();
+        assert_eq!(plan.cluster_sockets.len(), 2);
+        // every counted point can be walked to, so the spec can finish
+        let all = plan.seed(t, usize::MAX);
+        assert_eq!(all.len(), plan.nodes.len() + 1);
+        let mut have = all.clone();
+        have.extend(&plan.cluster_sockets);
+        let view = plan.view(t, &have, 5);
+        assert_eq!((view.done, view.total), (plan.nodes.len(), plan.nodes.len()));
+        assert!(view.next.is_empty() && view.refunds.is_empty());
     }
 }

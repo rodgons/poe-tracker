@@ -43,10 +43,12 @@ pub fn path(config_dir: PathBuf) -> PathBuf {
 }
 
 pub fn load(path: &PathBuf) -> Saved {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    let Ok(text) = std::fs::read_to_string(path) else { return Saved::default() };
+    serde_json::from_str(&text).unwrap_or_else(|_| {
+        // set aside what couldn't be read, so the next save doesn't wipe it
+        let _ = std::fs::rename(path, path.with_extension("json.bad"));
+        Saved::default()
+    })
 }
 
 pub fn save(path: &PathBuf, saved: &Saved) -> Result<(), String> {
@@ -56,4 +58,23 @@ pub fn save(path: &PathBuf, saved: &Saved) -> Result<(), String> {
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, serde_json::to_string_pretty(saved).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     std::fs::rename(tmp, path).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keeps_an_unreadable_file_aside() {
+        let dir = std::env::temp_dir().join(format!("poe-tracker-store-{}", std::process::id()));
+        let file = path(dir.clone());
+        let mut saved = Saved::default();
+        saved.character = "shiefire".into();
+        save(&file, &saved).unwrap();
+        assert_eq!(load(&file).character, "shiefire");
+        std::fs::write(&file, "{ not json").unwrap();
+        assert_eq!(load(&file).character, "");
+        assert_eq!(std::fs::read_to_string(file.with_extension("json.bad")).unwrap(), "{ not json");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

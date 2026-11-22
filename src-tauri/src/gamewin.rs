@@ -14,7 +14,7 @@ pub const LOGICAL: bool = cfg!(target_os = "macos");
 
 #[cfg(target_os = "macos")]
 pub fn frontmost_frame() -> Option<Frame> {
-    use objc2::{class, msg_send, runtime::AnyObject};
+    use objc2::{class, msg_send, rc::autoreleasepool, runtime::AnyObject};
     use std::ffi::c_void;
 
     type CFTypeRef = *const c_void;
@@ -46,13 +46,20 @@ pub fn frontmost_frame() -> Option<Frame> {
     const EXCLUDE_DESKTOP: u32 = 1 << 4;
     const SINT32: isize = 3;
 
-    unsafe {
+    // called every half second off the main thread: without a pool the
+    // autoreleased frontmost app would leak each time
+    let pid: i32 = autoreleasepool(|_| unsafe {
         let ws: *mut AnyObject = msg_send![class!(NSWorkspace), sharedWorkspace];
         let app: *mut AnyObject = msg_send![ws, frontmostApplication];
         if app.is_null() {
-            return None;
+            return -1;
         }
-        let pid: i32 = msg_send![app, processIdentifier];
+        msg_send![app, processIdentifier]
+    });
+    if pid < 0 {
+        return None;
+    }
+    unsafe {
         let number = |dict: CFTypeRef, key: CFTypeRef| {
             let v = CFDictionaryGetValue(dict, key);
             let mut out = 0i32;
