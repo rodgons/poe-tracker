@@ -63,3 +63,12 @@ pub fn order_out(win: &WebviewWindow) {
         let _: () = msg_send![w, orderOut: nil];
     }
 }
+
+/// Brings the app forward so the Setup window takes keyboard focus. The app runs
+/// as an accessory (no Dock icon), which otherwise never becomes active.
+pub fn activate() {
+    unsafe {
+        let app: *mut AnyObject = msg_send![objc2::class!(NSApplication), sharedApplication];
+        let _: () = msg_send![app, activateIgnoringOtherApps: true];
+    }
+}

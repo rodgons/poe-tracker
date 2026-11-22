@@ -1,5 +1,5 @@
-// Listen-only key hook: observes the panel hotkey (Alt/Option+P) and Esc,
-// never consumes or simulates keys.
+// Listen-only key hook: observes the panel hotkey (Alt/Option+P), the zoom keys
+// (Alt/Option + = - 0) and Esc, never consumes or simulates keys.
 use rdev::{listen, EventType, Key};
 use std::sync::mpsc::Sender;
 
@@ -17,7 +17,9 @@ pub fn spawn(tx: Sender<Msg>) {
         let result = listen(move |event| match event.event_type {
             EventType::KeyPress(Key::Alt | Key::AltGr) => alt = true,
             EventType::KeyRelease(Key::Alt | Key::AltGr) => alt = false,
-            EventType::KeyPress(key @ (Key::KeyP | Key::Escape)) => {
+            EventType::KeyPress(
+                key @ (Key::KeyP | Key::Escape | Key::Equal | Key::KpPlus | Key::Minus | Key::KpMinus | Key::Num0),
+            ) => {
                 if held == Some(key) {
                     return;
                 }
@@ -29,6 +31,15 @@ pub fn spawn(tx: Sender<Msg>) {
                     }
                     Key::Escape => {
                         let _ = tx.send(Msg::Esc);
+                    }
+                    Key::Equal | Key::KpPlus if alt => {
+                        let _ = tx.send(Msg::Zoom(1));
+                    }
+                    Key::Minus | Key::KpMinus if alt => {
+                        let _ = tx.send(Msg::Zoom(-1));
+                    }
+                    Key::Num0 if alt => {
+                        let _ = tx.send(Msg::Zoom(0));
                     }
                     _ => {}
                 }

@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>POE Tracker · Set up build</title>
+<style>
+  /* Setup window: paste a build, pick a Tree spec, name the Character, set the Seed. */
+  :root {
+    color-scheme: dark;
+    --bg: #17130f; --card: #211b15; --ink: #ece3d2; --dim: #a39581; --faint: #4c4238;
+    --gold: #e3c46a; --next: #5fd3c4; --bad: #e0806f;
+    --body: -apple-system, "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px; background: var(--bg); color: var(--ink); font: 13px/1.5 var(--body); }
+  h1 { margin: 0 0 16px; font: 600 16px Georgia, serif; letter-spacing: .05em; color: var(--gold); }
+  section { background: var(--card); border: 1px solid var(--faint); border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+  section.off { opacity: .45; pointer-events: none; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  label small { font-weight: 400; color: var(--dim); }
+  textarea, input, select {
+    width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--faint);
+    border-radius: 6px; padding: 8px; font: 12.5px var(--body);
+  }
+  textarea { height: 64px; resize: vertical; font-family: var(--mono); font-size: 11.5px; }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--gold); outline-offset: -1px; }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .row input[type=number] { width: 90px; }
+  .hint { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .hint b { color: var(--next); font-weight: 600; }
+  button {
+    background: var(--gold); color: #1b150e; border: 0; border-radius: 6px; padding: 8px 16px;
+    font: 600 13px var(--body); cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  button.ghost { background: transparent; color: var(--gold); border: 1px solid var(--gold); }
+  .err { color: var(--bad); min-height: 1.5em; margin: 4px 0 0; }
+  footer { display: flex; justify-content: flex-end; gap: 8px; align-items: center; }
+  footer .err { flex: 1; margin: 0; }
+</style>
+</head>
+<body>
+<h1>Set up build</h1>
+
+<section>
+  <label for="input">Path of Building build <small>(export code, pobb.in or pastebin link)</small></label>
+  <textarea id="input" spellcheck="false" placeholder="https://pobb.in/… or eNrtvW…"></textarea>
+  <div class="row"><button class="ghost" id="load">Load build</button><span class="hint" id="loaded"></span></div>
+  <p class="err" id="loadErr"></p>
+</section>
+
+<section id="pick" class="off">
+  <label for="spec">Tree spec</label>
+  <select id="spec"></select>
+  <label for="character" style="margin-top:12px">Character name <small>(the character this build is for)</small></label>
+  <input id="character" spellcheck="false" autocomplete="off">
+  <label for="taken" style="margin-top:12px">Points already taken in this spec</label>
+  <div class="row"><input type="number" id="taken" min="0" value="0"><span class="hint" id="takenHint"></span></div>
+</section>
+
+<footer><p class="err" id="saveErr"></p><button id="save" disabled>Save</button></footer>
+
+<script>
+  const { invoke } = window.__TAURI__.core
+  const $ = id => document.getElementById(id)
+  let order = []
+
+  function showSpecs(specs, chosen) {
+    $('spec').innerHTML = specs.map((s, i) => `<option value="${i}">${s.title.replace(/</g, '&lt;')} · ${s.points} points</option>`).join('')
+    $('spec').value = String(chosen)
+    $('pick').classList.remove('off')
+    $('save').disabled = false
+    return loadOrder()
+  }
+
+  async function loadOrder() {
+    order = await invoke('spec_order', { spec: Number($('spec').value) })
+    $('taken').max = order.length
+    if (Number($('taken').value) > order.length) $('taken').value = order.length
+    hint()
+  }
+
+  function hint() {
+    const n = Math.max(0, Math.min(order.length, Number($('taken').value) || 0))
+    $('takenHint').innerHTML = n === 0
+      ? `Nothing yet. First point: <b>${order[0] ?? '—'}</b>`
+      : n === order.length ? 'The whole spec is taken'
+      : `Up to ${order[n - 1]}. Next: <b>${order[n]}</b>`
+  }
+
+  $('load').onclick = async () => {
+    $('loadErr').textContent = ''; $('loaded').textContent = 'Loading…'; $('load').disabled = true
+    try {
+      const b = await invoke('load_build', { input: $('input').value })
+      $('loaded').textContent = `${b.specs.length} tree specs`
+      $('taken').value = 0
+      await showSpecs(b.specs, b.active)
+    } catch (e) {
+      $('loaded').textContent = ''; $('loadErr').textContent = e
+    } finally {
+      $('load').disabled = false
+    }
+  }
+  $('spec').onchange = loadOrder
+  $('taken').oninput = hint
+
+  $('save').onclick = async () => {
+    $('saveErr').textContent = ''
+    if (!$('character').value.trim()) { $('saveErr').textContent = 'Type your character name.'; return }
+    try {
+      await invoke('save_setup', {
+        spec: Number($('spec').value),
+        character: $('character').value,
+        taken: Math.max(0, Math.min(order.length, Number($('taken').value) || 0)),
+      })
+    } catch (e) {
+      $('saveErr').textContent = e
+    }
+  }
+
+  invoke('current_setup').then(s => {
+    $('input').value = s.input
+    $('character').value = s.character
+    $('taken').value = s.taken
+    if (s.specs.length) {
+      $('loaded').textContent = `${s.specs.length} tree specs · shown on tree ${s.tree_version}`
+      showSpecs(s.specs, s.spec)
+    }
+  })
+</script>
+</body>
+</html>
