@@ -50,7 +50,7 @@ const MiniTree = (() => {
       const named = n.s === 'next' || n.s === 'refund' || (n.k !== 'small' && n.k !== 'start' && n.k !== 'mastery' && n.s !== 'other')
       if (named) g += `<text x="${n.x}" y="${n.y - r - 5 * u}" font-size="${10 * u}" text-anchor="middle" fill="${n.s === 'next' ? 'var(--next)' : n.s === 'refund' ? 'var(--refund)' : n.s === 'alloc' ? 'var(--alloc)' : 'var(--dim)'}" font-weight="${n.s === 'next' ? 600 : 400}" pointer-events="none">${esc(n.n.split(' → ')[0])}</text>`
     }
-    return `<svg class="minitree${cam.zoom > 1 ? ' zoomed' : ''}${cam.drag ? ' dragging' : ''}" viewBox="${x0} ${y0} ${w} ${h}" role="img" aria-label="Passive tree">${g}</svg>`
+    return `<svg style="user-select:none;-webkit-user-select:none" class="minitree${cam.zoom > 1 ? ' zoomed' : ''}${cam.drag ? ' dragging' : ''}" viewBox="${x0} ${y0} ${w} ${h}" role="img" aria-label="Passive tree">${g}</svg>`
   }
 
   /** Mouse on `host` (which holds the SVG): scroll zooms around the pointer, dragging moves
@@ -84,6 +84,7 @@ const MiniTree = (() => {
     }, { passive: false })
     host.addEventListener('pointerdown', e => {
       if (cam.zoom === 1 || !cam.frame || e.button !== 0 || !e.target.closest('svg.minitree')) return
+      e.preventDefault()
       cam.drag = { x: e.clientX, y: e.clientY, cx: cam.frame.cx, cy: cam.frame.cy, scale: cam.frame.w / under(e).box.width }
       host.setPointerCapture(e.pointerId)
       redraw()
