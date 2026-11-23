@@ -129,12 +129,13 @@ fn shortcut(b: &Bind) -> Option<Shortcut> {
 pub fn grabbed_message(pressed: &Shortcut) -> Option<Msg> {
     let grabbed = GRABBED.load(Ordering::Relaxed);
     let binds = BINDS.read().unwrap();
-    binds
+    let hit = binds
         .all()
         .into_iter()
         .enumerate()
         .find(|(i, (b, _))| grabbed & 1 << i != 0 && shortcut(b).as_ref() == Some(pressed))
-        .map(|(_, (_, msg))| msg)
+        .map(|(_, (_, msg))| msg);
+    hit
 }
 
 /// Registers the wanted binds (bits of `Binds::all()`) as OS hot keys and drops the
