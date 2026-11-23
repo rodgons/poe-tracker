@@ -311,7 +311,8 @@ fn panel_view_of(app: &App) -> Option<tree::PanelView> {
         } else {
             "checked on pathofexile.com when you change area"
         };
-        view.notices.insert(0, format!("Refund pending: {} ({when})", names.join(", ")));
+        view.notices.insert(0, format!("Pending refund: {} ({when})", names.join(", ")));
+        view.pending = app.refunding.clone();
     }
     Some(view)
 }
@@ -731,6 +732,37 @@ fn open_build(app: &AppHandle) {
     let _ = win.set_focus();
 }
 
+/// Auto-update, once at launch: if GitHub has a newer release, download and install it, then
+/// restart into it straight away unless the Corner panel is showing. Then the tray menu offers
+/// the restart instead, so an update never takes the panel away mid-game. (On Windows the
+/// installer closes the app itself.) Any failure just leaves the current version running.
+async fn update(app: AppHandle, menu: Menu<tauri::Wry>) {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = match app.updater() {
+        Ok(updater) => updater,
+        Err(e) => return eprintln!("updater unavailable: {e}"),
+    };
+    let update = match updater.check().await {
+        Ok(Some(update)) => update,
+        Ok(None) => return,
+        Err(e) => return eprintln!("update check failed: {e}"),
+    };
+    if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
+        return eprintln!("update to {} failed: {e}", update.version);
+    }
+    let panel_shown = app.get_webview_window("corner").and_then(|w| w.is_visible().ok()).unwrap_or(false);
+    if !panel_shown {
+        app.restart();
+    }
+    let label = format!("Restart to update to v{}", update.version);
+    match MenuItem::with_id(&app, "update", label, true, None::<&str>) {
+        Ok(item) => {
+            let _ = menu.insert(&item, 0);
+        }
+        Err(e) => eprintln!("update menu item: {e}"),
+    }
+}
+
 fn open_setup(app: &AppHandle) {
     let Some(win) = app.get_webview_window("setup") else { return };
     #[cfg(target_os = "macos")]
@@ -775,7 +807,7 @@ pub fn run() {
                 })
                 .build(),
         )
-        // off: no capability lets a page call it and the app never checks (see the v0.5 ticket)
+        // checked from Rust at launch (see `update`); no capability lets a page call it
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             initial_status,
@@ -842,10 +874,11 @@ pub fn run() {
             let setup_item = MenuItem::with_id(app, "setup", "Set up build…", true, None::<&str>)?;
             let resync_item = MenuItem::with_id(app, "resync", "Re-sync character…", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit POE Tracker", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&panel_item, &build_item, &setup_item, &resync_item, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("POE Tracker")
-                .menu(&Menu::with_items(app, &[&panel_item, &build_item, &setup_item, &resync_item, &quit])?)
+                .menu(&menu)
                 .on_menu_event(move |app, e| match e.id().as_ref() {
                     "panel" => {
                         let _ = tray_tx.send(Msg::TogglePanel);
@@ -853,6 +886,7 @@ pub fn run() {
                     "build" => open_build(app),
                     "setup" => open_setup(app),
                     "resync" => resync(app),
+                    "update" => app.restart(),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -868,6 +902,7 @@ pub fn run() {
             std::thread::spawn(move || run_toggle_loop(handle, rx));
             let handle = app.handle().clone();
             std::thread::spawn(move || follow_log(handle));
+            tauri::async_runtime::spawn(update(app.handle().clone(), menu));
             Ok(())
         })
         .run(tauri::generate_context!())

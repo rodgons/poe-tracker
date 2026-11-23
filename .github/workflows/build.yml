@@ -22,9 +22,12 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+      # pnpm's version comes from package.json's packageManager field
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
+          cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
@@ -35,7 +38,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils libxtst-dev libxi-dev
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
       - if: matrix.platform == 'macos-latest'
         run: cargo test --manifest-path src-tauri/Cargo.toml --lib
       - uses: tauri-apps/tauri-action@v1
@@ -45,8 +48,11 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          tauriScript: pnpm tauri
           tagName: v__VERSION__
           releaseName: POE Tracker v__VERSION__
-          releaseBody: Unsigned test build. See the release notes in the issue that asked for it.
-          prerelease: true
+          # task/** branches publish test prereleases; main and v* tags publish the release
+          # the updater follows (releases/latest skips prereleases)
+          releaseBody: ${{ startsWith(github.ref, 'refs/heads/task/') && 'Unsigned test build. See the release notes in the issue that asked for it.' || 'Unsigned build. Installed copies from v0.5.4 on update themselves at launch.' }}
+          prerelease: ${{ startsWith(github.ref, 'refs/heads/task/') }}
           args: ${{ matrix.args }}
