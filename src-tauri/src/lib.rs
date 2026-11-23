@@ -41,6 +41,11 @@ struct App {
     frame: Option<gamewin::Frame>,
     /// where the Corner panel was (logical) when the player started dragging it
     drag_from: Option<(f64, f64)>,
+    /// nodes clicked for refund in the game. The log says nothing on Apply or Cancel,
+    /// so they stay Allocated until an import on the next area change settles them.
+    refunding: Vec<u32>,
+    /// that import failed (or there's no account): wait for a Re-sync instead
+    refund_unchecked: bool,
 }
 
 impl App {
@@ -80,6 +85,8 @@ struct Setup {
     character: String,
     spec: usize,
     taken: usize,
+    /// how many Next points the panel shows
+    points: usize,
     specs: Vec<SpecChoice>,
     tree_version: String,
     /// the Client.txt being followed; None when none was found
@@ -97,7 +104,12 @@ pub enum Msg {
     TogglePanel,
     /// the frontmost app, and its window frame when it's the game
     Frontmost(String, Option<gamewin::Frame>),
+    /// the player saved new key binds
+    Rebind(keys::Binds),
 }
+
+/// Where key presses go: the toggle loop.
+struct KeyTx(Mutex<mpsc::Sender<Msg>>);
 
 #[derive(Clone, Serialize)]
 struct Status {
@@ -190,7 +202,7 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
             // showing needs the game in front; hiding works from anywhere
             Msg::Hotkey if in_poe || visible => {
                 presses += 1;
-                key = "⌥/Alt+P";
+                key = "panel hotkey";
                 visible = !visible;
             }
             Msg::Esc if visible => {
@@ -223,8 +235,12 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                 }
                 frontmost = name;
             }
+            Msg::Rebind(binds) => keys::rebind(&app, binds),
             _ => continue,
         }
+        // take the binds from the game only while it's in front (zoom and pan only with the panel shown)
+        let want = if foreground::is_poe(&frontmost) { keys::TOGGLE | if visible { keys::VIEW } else { 0 } } else { 0 };
+        keys::grab(&app, want);
         let status = Status {
             key,
             presses,
@@ -258,6 +274,9 @@ fn poll_frontmost(tx: mpsc::Sender<Msg>) {
     }
 }
 
+/// the most Next points the Setup window lets the panel number
+const MAX_POINTS: usize = 15;
+
 fn spec_choices(build: &pob::Build) -> Vec<SpecChoice> {
     build
         .specs
@@ -275,6 +294,7 @@ fn panel_view_of(app: &App) -> Option<tree::PanelView> {
     let plan = tree::Plan::new(tree::tree(), spec).ok()?;
     let allocated: HashSet<u32> = saved.allocated.iter().copied().collect();
     let mut view = plan.view(tree::tree(), &allocated, saved.points);
+    view.next_spec = saved.build.as_ref()?.specs.get(saved.spec + 1).map(|s| s.title.clone());
     if let Some(note) = &app.synced {
         view.notices.insert(0, note.clone());
     }
@@ -282,6 +302,16 @@ fn panel_view_of(app: &App) -> Option<tree::PanelView> {
         view.notices.insert(0, format!("Playing {other}? Ticking paused (Re-sync character to resume)"));
     } else if app.watching.is_none() {
         view.notices.push("Client.txt not found: points won't tick. Pick it in Set up build…".into());
+    }
+    if !app.refunding.is_empty() {
+        let t = tree::tree();
+        let names: Vec<&str> = app.refunding.iter().filter_map(|n| t.nodes.get(n)).map(|n| n.name.as_str()).collect();
+        let when = if app.refund_unchecked || app.saved.account.is_empty() {
+            "Re-sync character once applied"
+        } else {
+            "checked on pathofexile.com when you change area"
+        };
+        view.notices.insert(0, format!("Refund pending: {} ({when})", names.join(", ")));
     }
     Some(view)
 }
@@ -310,19 +340,32 @@ fn on_log_line(handle: &AppHandle, line: &str) {
                     app.saved.allocated.push(hash);
                     true
                 }
+                // taking back a node that was waiting to be refunded: it stays
+                Some(hash) if app.refunding.contains(&hash) => {
+                    app.refunding.retain(|n| *n != hash);
+                    true
+                }
                 _ => false,
             }
         }
+        // logged on the click, before Apply or Cancel: keep the node until an import says
         clientlog::Event::Unallocated { id, name } => {
             let have = app.saved.allocated.clone();
             match t.node_for_log(&id, &name, have) {
-                Some(hash) => {
-                    let before = app.saved.allocated.len();
-                    app.saved.allocated.retain(|n| *n != hash);
-                    app.saved.allocated.len() != before
+                Some(hash) if app.saved.allocated.contains(&hash) && !app.refunding.contains(&hash) => {
+                    app.refunding.push(hash);
+                    true
                 }
-                None => false,
+                _ => false,
             }
+        }
+        clientlog::Event::Entered => {
+            let s = &app.saved;
+            let spec = s.build.as_ref().and_then(|b| b.specs.get(s.spec));
+            if let Some(spec) = spec.filter(|_| !app.refunding.is_empty() && !app.refund_unchecked && !s.account.is_empty()) {
+                settle_refunds(handle, s.account.clone(), s.character.clone(), spec.clone());
+            }
+            false
         }
     };
     if changed {
@@ -330,6 +373,26 @@ fn on_log_line(handle: &AppHandle, line: &str) {
         let _ = store::save(&app.path, &app.saved);
         let _ = handle.emit("plan", panel_view_of(app));
     }
+}
+
+/// Imports the Character from pathofexile.com to learn which pending refunds were
+/// applied. When it can't, the refunds wait for a Re-sync.
+fn settle_refunds(handle: &AppHandle, account: String, character: String, spec: pob::Spec) {
+    let app = handle.clone();
+    std::thread::spawn(move || {
+        let imported = import_allocated(&account, &character, &spec);
+        let st = app.state::<AppState>();
+        let mut st = st.lock().unwrap();
+        match imported {
+            Ok(allocated) => {
+                st.saved.allocated = allocated;
+                st.refunding.clear();
+                let _ = store::save(&st.path, &st.saved);
+            }
+            Err(_) => st.refund_unchecked = true,
+        }
+        let _ = app.emit("plan", panel_view_of(&st));
+    });
 }
 
 /// Follows Client.txt for the app's lifetime, switching files when the player picks another.
@@ -398,10 +461,29 @@ fn current_setup(state: State<'_, AppState>) -> Setup {
         character: saved.character.clone(),
         spec: saved.spec,
         taken: panel_view_of(&app).map_or(0, |v| v.done),
+        points: saved.points,
         specs: saved.build.as_ref().map(spec_choices).unwrap_or_default(),
         tree_version: tree::tree().version.clone(),
         log_path: app.watching.clone().or_else(|| app.log_path()).map(|p| p.display().to_string()),
     }
+}
+
+#[tauri::command]
+fn key_binds(state: State<'_, AppState>) -> keys::Binds {
+    state.lock().unwrap().saved.binds.clone()
+}
+
+/// Saves new key binds and listens for them at once; None puts back the defaults.
+#[tauri::command]
+fn set_binds(binds: Option<keys::Binds>, app: AppHandle, state: State<'_, AppState>) -> Result<keys::Binds, String> {
+    let binds = binds.unwrap_or_default();
+    binds.check()?;
+    let mut guard = state.lock().unwrap();
+    guard.saved.binds = binds.clone();
+    store::save(&guard.path, &guard.saved)?;
+    let _ = app.state::<KeyTx>().0.lock().unwrap().send(Msg::Rebind(binds.clone()));
+    let _ = app.emit("binds", &binds);
+    Ok(binds)
 }
 
 /// Lets the player pick Client.txt when it isn't in a usual install folder.
@@ -450,6 +532,7 @@ async fn save_setup(
     account: String,
     character: String,
     taken: Option<usize>,
+    points: usize,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
@@ -490,6 +573,9 @@ async fn save_setup(
     st.saved.account = account;
     st.saved.character = character;
     st.saved.allocated = allocated;
+    st.refunding.clear();
+    st.refund_unchecked = false;
+    st.saved.points = points.clamp(1, MAX_POINTS);
     // saving (or re-syncing) says the Character is the one playing
     st.playing = None;
     st.synced = None;
@@ -523,6 +609,8 @@ fn resync(app: &AppHandle) {
             let mut st = st.lock().unwrap();
             st.saved.allocated = allocated;
             st.playing = None;
+            st.refunding.clear();
+            st.refund_unchecked = false;
             st.synced = Some(format!("Re-synced {character} from pathofexile.com"));
             let _ = store::save(&st.path, &st.saved);
             let _ = app.emit("plan", panel_view_of(&st));
@@ -675,11 +763,27 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        return;
+                    }
+                    if let (Some(msg), Some(tx)) = (keys::grabbed_message(shortcut), app.try_state::<KeyTx>()) {
+                        let _ = tx.0.lock().unwrap().send(msg);
+                    }
+                })
+                .build(),
+        )
+        // off: no capability lets a page call it and the app never checks (see the v0.5 ticket)
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             initial_status,
             load_build,
             spec_order,
             current_setup,
+            key_binds,
+            set_binds,
             save_setup,
             panel_view,
             choose_log,
@@ -692,8 +796,9 @@ pub fn run() {
         .setup(|app| {
             let path = store::path(app.path().app_config_dir()?);
             let saved = store::load(&path);
+            keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false }));
 
             #[cfg(target_os = "macos")]
             {
@@ -731,6 +836,7 @@ pub fn run() {
 
             let (tx, rx) = mpsc::channel();
             let tray_tx = tx.clone();
+            app.manage(KeyTx(Mutex::new(tx.clone())));
             let panel_item = MenuItem::with_id(app, "panel", "Show/Hide panel", true, None::<&str>)?;
             let build_item = MenuItem::with_id(app, "build", "Open build…", true, None::<&str>)?;
             let setup_item = MenuItem::with_id(app, "setup", "Set up build…", true, None::<&str>)?;

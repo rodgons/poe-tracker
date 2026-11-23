@@ -38,12 +38,13 @@
 <body>
 <div class="panel" id="panel"><p class="empty">Loading…</p></div>
 <script src="minitree.js"></script>
+<script src="keys.js"></script>
 <script>
   const { invoke } = window.__TAURI__.core
   const { listen } = window.__TAURI__.event
   const esc = MiniTree.esc
   let permission = ''
-  const hotkey = navigator.userAgent.includes('Mac') ? '⌥P' : 'Alt+P'
+  let hotkey = KeyLabel.format({ code: 'KeyP', alt: true })
   let cam = MiniTree.camera(1)
   try { cam = MiniTree.camera(Number(localStorage.getItem('zoom'))) } catch {}
   const keepZoom = () => { try { localStorage.setItem('zoom', cam.zoom) } catch {} }
@@ -58,7 +59,7 @@
     const refunds = v.refunds.length ? `<span class="refund">Refund: ${v.refunds.map(esc).join(', ')}</span>` : '<span>Refund: none</span>'
     const legend = v.next.length
       ? `<span><span style="color:var(--next)">●</span> next ${v.next.length} numbered · gold = taken${v.refunds.length ? ' · <span style="color:var(--refund)">red = refund</span>' : ''} · dashed = later${cam.zoom > 1 ? ` · ×${cam.zoom.toFixed(1)}` : ''}</span>`
-      : '<span style="color:var(--alloc)">Spec complete</span>'
+      : `<span style="color:var(--alloc)">Spec complete${v.next_spec ? ` — next: ${esc(v.next_spec)}. Switch in Open build…` : ''}</span>`
     panel.innerHTML = `
       <div class="hd" title="Drag to move the panel"><h1>${esc(v.spec)}</h1><span>${v.done} / ${v.total}</span></div>
       <div class="bar"><i style="width:${v.total ? 100 * v.done / v.total : 0}%"></i></div>
@@ -78,6 +79,9 @@
   listen('status', e => { permission = e.payload.permission })
   invoke('panel_view').then(v => { view = v; render(view) })
   listen('plan', e => { view = e.payload; render(view) })
+  const useBinds = b => { hotkey = KeyLabel.format(b.toggle); render(view) }
+  invoke('key_binds').then(useBinds)
+  listen('binds', e => useBinds(e.payload))
   listen('zoom', e => { MiniTree.key(cam, e.payload); keepZoom(); render(view) })
   listen('pan', e => { MiniTree.pan(cam, e.payload); render(view) })
   MiniTree.attach(panel, cam, () => render(view), keepZoom)
