@@ -355,7 +355,13 @@ fn follow_log(handle: AppHandle) {
             || {
                 let app = handle.state::<AppState>();
                 let app = app.lock().unwrap();
-                app.saved.log_path.as_ref().is_none_or(|p| *p == watched) && watched.is_file()
+                // switch when the player picks another file, or, when they haven't picked
+                // one, when the game starts writing a different usual log
+                let still = match &app.saved.log_path {
+                    Some(p) => *p == watched,
+                    None => clientlog::find().is_none_or(|p| p == watched),
+                };
+                still && watched.is_file()
             },
         );
     }
