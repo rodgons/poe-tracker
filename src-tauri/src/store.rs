@@ -11,6 +11,8 @@ pub struct Saved {
     pub build: Option<Build>,
     pub spec: usize,
     pub character: String,
+    /// pathofexile.com account (Name#1234) for the character import; empty sets points by hand
+    pub account: String,
     pub allocated: Vec<u32>,
     /// how many Next points the panel shows
     pub points: usize,
@@ -25,6 +27,7 @@ impl Default for Saved {
             build: None,
             spec: 0,
             character: String::new(),
+            account: String::new(),
             allocated: Vec::new(),
             points: 5,
             log_path: None,

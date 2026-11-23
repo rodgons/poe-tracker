@@ -1,5 +1,8 @@
 // macOS window and permission glue, done with raw AppKit messages.
-use objc2::{msg_send, runtime::AnyObject};
+use objc2::{
+    msg_send,
+    runtime::{AnyClass, AnyObject},
+};
 use tauri::WebviewWindow;
 
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -7,6 +10,13 @@ extern "C" {
     fn CGPreflightListenEventAccess() -> bool;
     fn CGRequestListenEventAccess() -> bool;
 }
+
+extern "C" {
+    fn object_setClass(obj: *mut AnyObject, cls: *const AnyClass) -> *const AnyClass;
+}
+
+// NSWindowStyleMaskNonactivatingPanel
+const NONACTIVATING_PANEL: usize = 1 << 7;
 
 // NSWindowCollectionBehavior bits
 const CAN_JOIN_ALL_SPACES: usize = 1 << 0;
@@ -34,6 +44,21 @@ pub fn listen_permission() -> &'static str {
 
 fn ns_window(win: &WebviewWindow) -> Option<*mut AnyObject> {
     win.ns_window().ok().map(|w| w as *mut AnyObject)
+}
+
+/// Turns the panel into a non-activating NSPanel, so scrolling or dragging on it
+/// never takes focus from the game (the same trick as tauri-nspanel). Call before
+/// float_over_fullscreen, which sets the level.
+pub fn make_nonactivating(win: &WebviewWindow) {
+    let Some(w) = ns_window(win) else { return };
+    unsafe {
+        object_setClass(w, objc2::class!(NSPanel));
+        let mask: usize = msg_send![w, styleMask];
+        let _: () = msg_send![w, setStyleMask: mask | NONACTIVATING_PANEL];
+        let _: () = msg_send![w, setBecomesKeyOnlyIfNeeded: true];
+        // panels hide when their app deactivates by default; ours is rarely active
+        let _: () = msg_send![w, setHidesOnDeactivate: false];
+    }
 }
 
 /// Lets the panel appear over a game in its own full-screen Space.

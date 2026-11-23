@@ -20,6 +20,7 @@ mod keys;
 #[cfg(target_os = "macos")]
 mod macos;
 mod pob;
+mod poeapi;
 mod store;
 mod tree;
 
@@ -32,6 +33,8 @@ struct App {
     watching: Option<PathBuf>,
     /// the character the last level-up line named
     playing: Option<String>,
+    /// what the last Re-sync did, shown until the next tick
+    synced: Option<String>,
 }
 
 impl App {
@@ -65,6 +68,7 @@ struct Loaded {
 #[derive(Serialize)]
 struct Setup {
     input: String,
+    account: String,
     character: String,
     spec: usize,
     taken: usize,
@@ -111,6 +115,17 @@ fn place_in_corner(win: &WebviewWindow) {
     let x = area.position.x + area.size.width as i32 - size.width as i32 - margin;
     let y = area.position.y + margin;
     let _ = win.set_position(PhysicalPosition::new(x, y));
+}
+
+/// Clicking the panel mustn't take focus from the game.
+#[cfg(target_os = "windows")]
+fn no_activate(win: &WebviewWindow) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE};
+    let Ok(hwnd) = win.hwnd() else { return };
+    unsafe {
+        let hwnd = hwnd.0 as _;
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, GetWindowLongPtrW(hwnd, GWL_EXSTYLE) | WS_EX_NOACTIVATE as isize);
+    }
 }
 
 fn show(win: &WebviewWindow) {
@@ -210,6 +225,9 @@ fn panel_view_of(app: &App) -> Option<tree::PanelView> {
     let plan = tree::Plan::new(tree::tree(), spec).ok()?;
     let allocated: HashSet<u32> = saved.allocated.iter().copied().collect();
     let mut view = plan.view(tree::tree(), &allocated, saved.points);
+    if let Some(note) = &app.synced {
+        view.notices.insert(0, note.clone());
+    }
     if let Some(other) = app.paused_for() {
         view.notices.insert(0, format!("Playing {other}? Ticking paused (Re-sync character to resume)"));
     } else if app.watching.is_none() {
@@ -258,6 +276,7 @@ fn on_log_line(handle: &AppHandle, line: &str) {
         }
     };
     if changed {
+        app.synced = None;
         let _ = store::save(&app.path, &app.saved);
         let _ = handle.emit_to("corner", "plan", panel_view_of(app));
     }
@@ -319,10 +338,10 @@ fn current_setup(state: State<'_, AppState>) -> Setup {
     let saved = &app.saved;
     Setup {
         input: saved.input.clone(),
+        account: saved.account.clone(),
         character: saved.character.clone(),
         spec: saved.spec,
-        // the class start is always allocated and isn't a point
-        taken: saved.allocated.len().saturating_sub(1),
+        taken: panel_view_of(&app).map_or(0, |v| v.done),
         specs: saved.build.as_ref().map(spec_choices).unwrap_or_default(),
         tree_version: tree::tree().version.clone(),
         log_path: app.watching.clone().or_else(|| app.log_path()).map(|p| p.display().to_string()),
@@ -341,35 +360,127 @@ async fn choose_log(app: AppHandle, state: State<'_, AppState>) -> Result<Option
     Ok(Some(path.display().to_string()))
 }
 
+const CLASSES: [&str; 7] = ["Scion", "Marauder", "Ranger", "Witch", "Duelist", "Templar", "Shadow"];
+
+/// The Character's allocated nodes, imported from pathofexile.com.
+fn import_allocated(account: &str, character: &str, spec: &pob::Spec) -> Result<Vec<u32>, String> {
+    let t = tree::tree();
+    let plan = tree::Plan::new(t, spec)?;
+    let passives = poeapi::passives(account, character)?;
+    if passives.class_id != spec.class_id {
+        let class = |id: u32| CLASSES.get(id as usize).copied().unwrap_or("another class");
+        return Err(format!(
+            "{character} is a {}, but this tree spec is for a {}.",
+            class(passives.class_id),
+            class(spec.class_id)
+        ));
+    }
+    let mut allocated: Vec<u32> = plan.from_import(t, &passives.hashes).into_iter().collect();
+    allocated.sort_unstable();
+    Ok(allocated)
+}
+
+/// Lists the account's characters for the Setup window.
 #[tauri::command]
-fn save_setup(
+async fn find_characters(account: String) -> Result<Vec<poeapi::Character>, String> {
+    tauri::async_runtime::spawn_blocking(move || poeapi::characters(&account)).await.map_err(|e| e.to_string())?
+}
+
+/// Saves the setup. With `taken` the Seed is the first points in order; without,
+/// it's imported from pathofexile.com.
+#[tauri::command]
+async fn save_setup(
     spec: usize,
+    account: String,
     character: String,
-    taken: usize,
+    taken: Option<usize>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let (account, character) = (account.trim().to_string(), character.trim().to_string());
+    let chosen = {
+        let st = state.lock().unwrap();
+        let build = st.pending.as_ref().map(|(_, b)| b).or(st.saved.build.as_ref()).ok_or("Load a build first.")?;
+        build.specs.get(spec).ok_or("Pick a tree spec.")?.clone()
+    };
+    let allocated = match taken {
+        Some(taken) => {
+            let plan = tree::Plan::new(tree::tree(), &chosen)?;
+            let mut allocated: Vec<u32> = plan.seed(tree::tree(), taken).into_iter().collect();
+            allocated.sort_unstable();
+            allocated
+        }
+        None => {
+            let (a, c) = (account.clone(), character.clone());
+            tauri::async_runtime::spawn_blocking(move || import_allocated(&a, &c, &chosen))
+                .await
+                .map_err(|e| e.to_string())??
+        }
+    };
     let mut guard = state.lock().unwrap();
     let st = &mut *guard;
     if let Some((input, build)) = st.pending.take() {
         st.saved.input = input;
         st.saved.build = Some(build);
     }
-    let build = st.saved.build.as_ref().ok_or("Load a build first.")?;
-    let plan = tree::Plan::new(tree::tree(), build.specs.get(spec).ok_or("Pick a tree spec.")?)?;
-    let mut allocated: Vec<u32> = plan.seed(tree::tree(), taken).into_iter().collect();
-    allocated.sort_unstable();
     st.saved.spec = spec;
-    st.saved.character = character.trim().to_string();
+    st.saved.account = account;
+    st.saved.character = character;
     st.saved.allocated = allocated;
     // saving (or re-syncing) says the Character is the one playing
     st.playing = None;
+    st.synced = None;
     store::save(&st.path, &st.saved)?;
     let _ = app.emit_to("corner", "plan", panel_view_of(st));
     if let Some(win) = app.get_webview_window("setup") {
         let _ = win.hide();
     }
     Ok(())
+}
+
+/// Re-sync character: imports again when there's an account; without one, or
+/// when the import fails, opens the Setup window instead.
+fn resync(app: &AppHandle) {
+    let job = {
+        let st = app.state::<AppState>();
+        let st = st.lock().unwrap();
+        let s = &st.saved;
+        match s.build.as_ref().and_then(|b| b.specs.get(s.spec)) {
+            Some(spec) if !s.account.is_empty() && !s.character.is_empty() => {
+                Some((s.account.clone(), s.character.clone(), spec.clone()))
+            }
+            _ => None,
+        }
+    };
+    let Some((account, character, spec)) = job else { return open_setup(app) };
+    let app = app.clone();
+    std::thread::spawn(move || match import_allocated(&account, &character, &spec) {
+        Ok(allocated) => {
+            let st = app.state::<AppState>();
+            let mut st = st.lock().unwrap();
+            st.saved.allocated = allocated;
+            st.playing = None;
+            st.synced = Some(format!("Re-synced {character} from pathofexile.com"));
+            let _ = store::save(&st.path, &st.saved);
+            let _ = app.emit_to("corner", "plan", panel_view_of(&st));
+        }
+        Err(e) => {
+            let _ = app.emit_to("setup", "resync_error", format!("Re-sync failed: {e}"));
+            let handle = app.clone();
+            let _ = app.run_on_main_thread(move || open_setup(&handle));
+        }
+    });
+}
+
+/// Shrinks the corner window to the panel, so the empty space under it doesn't
+/// catch clicks meant for the game.
+#[tauri::command]
+fn fit_panel(height: f64, app: AppHandle) {
+    let Some(win) = app.get_webview_window("corner") else { return };
+    let Ok(scale) = win.scale_factor() else { return };
+    let Ok(size) = win.outer_size() else { return };
+    let width = size.width as f64 / scale;
+    let _ = win.set_size(tauri::LogicalSize::new(width, height.clamp(80.0, 900.0)));
 }
 
 #[tauri::command]
@@ -416,13 +527,15 @@ pub fn run() {
             current_setup,
             save_setup,
             panel_view,
-            choose_log
+            choose_log,
+            find_characters,
+            fit_panel
         ])
         .setup(|app| {
             let path = store::path(app.path().app_config_dir()?);
             let saved = store::load(&path);
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None }));
 
             #[cfg(target_os = "macos")]
             {
@@ -432,10 +545,15 @@ pub fn run() {
 
             let win = app.get_webview_window("corner").expect("corner window");
             place_in_corner(&win);
-            // display-only panel: clicks fall through to the game, so it never takes focus
-            let _ = win.set_ignore_cursor_events(true);
+            // the panel takes the mouse (scroll to zoom, drag to move) but never focus,
+            // so the game keeps the keyboard
             #[cfg(target_os = "macos")]
-            macos::float_over_fullscreen(&win);
+            {
+                macos::make_nonactivating(&win);
+                macos::float_over_fullscreen(&win);
+            }
+            #[cfg(target_os = "windows")]
+            no_activate(&win);
 
             // closing the Setup window only hides it, so the tray can reopen it
             if let Some(setup) = app.get_webview_window("setup") {
@@ -452,7 +570,6 @@ pub fn run() {
             let tray_tx = tx.clone();
             let panel_item = MenuItem::with_id(app, "panel", "Show/Hide panel", true, None::<&str>)?;
             let setup_item = MenuItem::with_id(app, "setup", "Set up build…", true, None::<&str>)?;
-            // re-running the hand Seed until the character import lands (v0.3)
             let resync_item = MenuItem::with_id(app, "resync", "Re-sync character…", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit POE Tracker", true, None::<&str>)?;
             TrayIconBuilder::new()
@@ -463,7 +580,8 @@ pub fn run() {
                     "panel" => {
                         let _ = tray_tx.send(Msg::TogglePanel);
                     }
-                    "setup" | "resync" => open_setup(app),
+                    "setup" => open_setup(app),
+                    "resync" => resync(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
