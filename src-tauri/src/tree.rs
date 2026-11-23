@@ -108,6 +108,8 @@ pub struct PanelView {
     edges: Vec<(u32, u32)>,
     next: Vec<NextPoint>,
     refunds: Vec<String>,
+    /// Pending refunds: Allocated nodes clicked to refund in game, not yet settled
+    pub pending: Vec<u32>,
     pub notices: Vec<String>,
     /// the Build's following Tree spec, named when this one is complete
     pub next_spec: Option<String>,
@@ -341,6 +343,7 @@ impl Plan {
                 })
                 .collect(),
             refunds,
+            pending: Vec::new(),
             notices,
             next_spec: None,
             bounds,

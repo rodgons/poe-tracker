@@ -7,9 +7,11 @@
   /* Build window: the whole Tree spec large, every point in order, the Refunds and the spec picker. */
   :root {
     color-scheme: dark;
-    --scene: #14110e; --scene2: #231d17; --ink: #ece3d2; --dim: #a39581; --faint: #4c4238;
-    --alloc: #e3c46a; --next: #5fd3c4; --plan: #8a7a63; --other: #352d25; --refund: #e0806f;
-    --card: #1b1612; --edge: #3a3027;
+    /* Path of Exile's palette: near-black panels, bronze frame, gold for taken points,
+       Magic-item blue for what's next, red for refunds */
+    --scene: #0b0a08; --scene2: #1a1712; --ink: #e0d6c3; --dim: #aa9e82; --faint: #4a4135;
+    --alloc: #d9b45a; --next: #8888ff; --plan: #8a8072; --other: #2a251e; --refund: #e04a3f;
+    --card: #141210; --edge: #3b3328;
     --display: "Cinzel", "Trajan Pro", Georgia, serif;
     --body: -apple-system, "Segoe UI", system-ui, sans-serif;
     --mono: ui-monospace, Menlo, Consolas, monospace;
@@ -48,7 +50,7 @@
   .empty b { color: var(--alloc); }
   #tip {
     position: fixed; pointer-events: none; max-width: 300px; padding: 8px 10px; border-radius: 6px;
-    background: rgba(18, 15, 12, .96); border: 1px solid #6b5a3e; font-size: 12px; display: none; z-index: 2;
+    background: rgba(11, 10, 8, .96); border: 1px solid #6e5a3a; font-size: 12px; display: none; z-index: 2;
   }
   #tip strong { display: block; color: var(--alloc); margin-bottom: 4px; }
   #tip div { color: var(--ink); }

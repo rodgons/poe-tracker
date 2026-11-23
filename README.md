@@ -10,7 +10,7 @@ Status: unsigned test builds (v0.x) for macOS, Windows and Linux. macOS is the p
 - **Corner panel**: toggled with ⌥/Alt+P while Path of Exile is in front, and only ever shown inside the game window. Scroll to zoom the Mini-tree, drag to move it, and drag the title to move the panel. It takes the mouse but never the keyboard.
 - **Open build…**: a normal window with the whole Tree spec large, every point in order (taken ✓, next numbered, then the rest), the Refunds in red, hover details, and the choice of Tree spec.
 - **Re-sync character…**: imports the Character's points again from pathofexile.com.
-- **Refunds in game**: the game logs a refund when you click the node, not when you Apply, so the panel shows it as *Refund pending* and keeps the point. On your next area change the app checks your pathofexile.com profile once to see whether you applied it (or waits for Re-sync if the profile is private).
+- **Refunds in game**: the game logs a refund when you click the node, not when you Apply, so the panel marks it as a *Pending refund* and keeps the point. On your next area change the app checks your pathofexile.com profile once to see whether you applied it (or waits for Re-sync if the profile is private).
 
 ## Install a test build
 

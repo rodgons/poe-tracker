@@ -311,7 +311,8 @@ fn panel_view_of(app: &App) -> Option<tree::PanelView> {
         } else {
             "checked on pathofexile.com when you change area"
         };
-        view.notices.insert(0, format!("Refund pending: {} ({when})", names.join(", ")));
+        view.notices.insert(0, format!("Pending refund: {} ({when})", names.join(", ")));
+        view.pending = app.refunding.clone();
     }
     Some(view)
 }
