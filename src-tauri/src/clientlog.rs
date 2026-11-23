@@ -43,6 +43,8 @@ pub fn candidates() -> Vec<PathBuf> {
     if let Some(home) = &home {
         if cfg!(target_os = "macos") {
             out.push(home.join("Library/Application Support/Path of Exile/Cache/Logs/Client.txt"));
+            // Steam on macOS keeps the standalone client's Cache/Logs layout (seen on the owner's Mac)
+            out.push(home.join("Library/Application Support/Steam/steamapps/common/Path of Exile/Cache/Logs/Client.txt"));
             out.push(home.join("Library/Application Support/Steam/steamapps/common/Path of Exile/logs/Client.txt"));
         }
         if cfg!(target_os = "linux") {
@@ -57,8 +59,18 @@ pub fn candidates() -> Vec<PathBuf> {
     out
 }
 
+/// The Client.txt the game wrote to last. An old install's log (say, the
+/// standalone client after moving to Steam) stays behind and mustn't win.
 pub fn find() -> Option<PathBuf> {
-    candidates().into_iter().find(|p| p.is_file())
+    newest(candidates())
+}
+
+fn newest(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    paths
+        .into_iter()
+        .filter_map(|p| Some((std::fs::metadata(&p).ok().filter(|m| m.is_file())?.modified().ok()?, p)))
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, p)| p)
 }
 
 /// Follows a log file, handing each new line to `on_line`. Starts at the current
@@ -130,6 +142,21 @@ mod tests {
         assert_eq!(parse(&format!("{HEAD}: You have entered The Coast.")), None);
         assert_eq!(parse(&format!("{HEAD}@From Trader: is now level 5")), None);
         assert_eq!(parse("***** LOG FILE OPENING *****"), None);
+    }
+
+    #[test]
+    fn picks_the_log_written_last() {
+        let dir = std::env::temp_dir().join(format!("poe-tracker-find-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (old, new) = (dir.join("old.txt"), dir.join("new.txt"));
+        std::fs::write(&new, "x").unwrap();
+        std::fs::write(&old, "x").unwrap();
+        let file = std::fs::File::options().write(true).open(&old).unwrap();
+        file.set_modified(std::time::SystemTime::now() - Duration::from_secs(86400 * 11)).unwrap();
+        // the stale log comes first, as the standalone path does
+        assert_eq!(newest([old.clone(), dir.join("missing.txt"), new.clone()]), Some(new));
+        assert_eq!(newest([dir.join("missing.txt")]), None);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

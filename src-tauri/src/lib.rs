@@ -51,8 +51,10 @@ impl App {
         (!chosen.is_empty() && !playing.eq_ignore_ascii_case(chosen)).then_some(playing)
     }
 
+    /// A picked file that's gone (game moved, drive unplugged) counts as not found,
+    /// so the log follower waits for it instead of spinning.
     fn log_path(&self) -> Option<PathBuf> {
-        self.saved.log_path.clone().or_else(clientlog::find)
+        self.saved.log_path.clone().or_else(clientlog::find).filter(|p| p.is_file())
     }
 }
 
@@ -353,7 +355,13 @@ fn follow_log(handle: AppHandle) {
             || {
                 let app = handle.state::<AppState>();
                 let app = app.lock().unwrap();
-                app.saved.log_path.as_ref().is_none_or(|p| *p == watched) && watched.is_file()
+                // switch when the player picks another file, or, when they haven't picked
+                // one, when the game starts writing a different usual log
+                let still = match &app.saved.log_path {
+                    Some(p) => *p == watched,
+                    None => clientlog::find().is_none_or(|p| p == watched),
+                };
+                still && watched.is_file()
             },
         );
     }
@@ -446,19 +454,26 @@ async fn save_setup(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (account, character) = (account.trim().to_string(), character.trim().to_string());
-    let chosen = {
+    let (chosen, kept) = {
         let st = state.lock().unwrap();
         let build = st.pending.as_ref().map(|(_, b)| b).or(st.saved.build.as_ref()).ok_or("Load a build first.")?;
-        build.specs.get(spec).ok_or("Pick a tree spec.")?.clone()
+        // re-saving the same spec with the taken count as it stands (say, to fix the
+        // character name) keeps the exact points, not the first ones in order
+        let unchanged = st.pending.is_none()
+            && spec == st.saved.spec
+            && taken.is_some()
+            && taken == panel_view_of(&st).map(|v| v.done);
+        (build.specs.get(spec).ok_or("Pick a tree spec.")?.clone(), unchanged.then(|| st.saved.allocated.clone()))
     };
-    let allocated = match taken {
-        Some(taken) => {
+    let allocated = match (kept, taken) {
+        (Some(kept), _) => kept,
+        (None, Some(taken)) => {
             let plan = tree::Plan::new(tree::tree(), &chosen)?;
             let mut allocated: Vec<u32> = plan.seed(tree::tree(), taken).into_iter().collect();
             allocated.sort_unstable();
             allocated
         }
-        None => {
+        (None, None) => {
             let (a, c) = (account.clone(), character.clone());
             tauri::async_runtime::spawn_blocking(move || import_allocated(&a, &c, &chosen))
                 .await

@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 const SITE: &str = "https://www.pathofexile.com/character-window";
+/// a stalled answer gives up instead of leaving the Setup window on "Importing…"
+pub const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 const USER_AGENT: &str = concat!("poe-tracker/", env!("CARGO_PKG_VERSION"), " (github.com/rodgons/poe-tracker)");
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -93,7 +95,7 @@ pub fn passives(account: &str, character: &str) -> Result<Passives, String> {
 }
 
 fn get(url: &str) -> Result<String, String> {
-    match ureq::get(url).set("User-Agent", USER_AGENT).call() {
+    match ureq::get(url).set("User-Agent", USER_AGENT).timeout(TIMEOUT).call() {
         Ok(resp) => resp.into_string().map_err(|e| format!("Couldn't read pathofexile.com's answer: {e}")),
         Err(ureq::Error::Status(429, resp)) => Err(format!(
             "pathofexile.com asked us to slow down. Try again in {} seconds.",
@@ -103,6 +105,7 @@ fn get(url: &str) -> Result<String, String> {
             Err("That profile is private. Make your Characters tab public on pathofexile.com (My Account → Privacy), or set the points by hand.".into())
         }
         Err(ureq::Error::Status(404, _)) => Err("Account or character not found. Check the spelling and the #1234 tag.".into()),
+        Err(ureq::Error::Status(code, _)) => Err(format!("pathofexile.com answered with an error ({code}). Try again later.")),
         Err(e) => Err(format!("Couldn't reach pathofexile.com: {e}")),
     }
 }
