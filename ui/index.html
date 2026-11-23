@@ -26,6 +26,7 @@
   svg { display: block; width: 100%; height: auto; touch-action: none; }
   svg.zoomed { cursor: grab; }
   svg.dragging { cursor: grabbing; }
+  .hd { cursor: move; user-select: none; }
   .meta { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--dim); }
   .meta .refund { color: var(--refund); }
   .meta .warn { color: var(--refund); }
@@ -36,65 +37,15 @@
 </head>
 <body>
 <div class="panel" id="panel"><p class="empty">Loading…</p></div>
+<script src="minitree.js"></script>
 <script>
   const { invoke } = window.__TAURI__.core
   const { listen } = window.__TAURI__.event
-  const R = { small: 46, notable: 78, keystone: 110, mastery: 64, jewel: 70, start: 120 }
-  const col = { alloc: 'var(--alloc)', refund: 'var(--refund)', next: 'var(--next)', plan: 'var(--plan)', other: 'var(--other)' }
-  const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+  const esc = MiniTree.esc
   let permission = ''
-  // zoom over the whole-spec view (1 = whole spec), centred on the next points
-  const MAX_ZOOM = 6
-  const clampZoom = z => Math.min(MAX_ZOOM, Math.max(1, z))
-  let zoom = 1
-  // where the zoomed view is centred; null follows the Next points
-  let center = null
-  try { zoom = clampZoom(Number(localStorage.getItem('zoom')) || 1) } catch {}
-  const keepZoom = () => { try { localStorage.setItem('zoom', zoom) } catch {} }
-
-  let frame = null
-  function tree(v, width) {
-    const by = Object.fromEntries(v.nodes.map(n => [n.id, n]))
-    const mine = v.nodes.filter(n => n.s !== 'other'), pad = 160
-    let x0 = Math.min(...mine.map(n => n.x)) - pad, y0 = Math.min(...mine.map(n => n.y)) - pad
-    let w = Math.max(...mine.map(n => n.x)) - x0 + pad, h = Math.max(...mine.map(n => n.y)) - y0 + pad
-    // a steady 0.72 aspect, so the panel keeps its size between specs
-    const ratio = 0.72
-    if (h < w * ratio) { y0 -= (w * ratio - h) / 2; h = w * ratio } else { x0 -= (h / ratio - w) / 2; w = h / ratio }
-    if (zoom > 1) {
-      const focus = v.nodes.filter(n => n.s === 'next').length ? v.nodes.filter(n => n.s === 'next') : mine
-      const [cx, cy] = center ?? [focus.reduce((a, n) => a + n.x, 0) / focus.length, focus.reduce((a, n) => a + n.y, 0) / focus.length]
-      const zw = w / zoom, zh = h / zoom
-      // stay inside the whole-spec frame
-      x0 = Math.min(Math.max(cx - zw / 2, x0), x0 + w - zw); y0 = Math.min(Math.max(cy - zh / 2, y0), y0 + h - zh)
-      w = zw; h = zh
-      if (center) center = [x0 + w / 2, y0 + h / 2]
-    }
-    frame = { x0, y0, cx: x0 + w / 2, cy: y0 + h / 2, w, h }
-    const u = w / width
-    let g = ''
-    for (const [a, b] of v.edges) {
-      const A = by[a], B = by[b]
-      const taken = n => n.s === 'alloc' || n.s === 'refund'
-      const s = taken(A) && taken(B) ? (A.s === 'refund' || B.s === 'refund' ? 'refund' : 'alloc')
-        : A.s !== 'other' && B.s !== 'other' && (A.s === 'next' || B.s === 'next') ? 'next'
-        : A.s !== 'other' && B.s !== 'other' ? 'plan' : 'other'
-      const dash = s === 'plan' ? `stroke-dasharray="${4 * u} ${3 * u}"` : ''
-      g += `<line x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" stroke="${col[s]}" stroke-width="${(s === 'other' ? 1 : s === 'plan' ? 1.4 : 2.4) * u}" ${dash}/>`
-    }
-    for (const n of v.nodes) {
-      const r = R[n.k] * (n.s === 'other' ? .7 : 1)
-      const fill = n.s === 'alloc' ? 'var(--alloc)' : n.s === 'refund' ? 'var(--refund)' : n.s === 'next' ? 'var(--scene)' : 'var(--scene2)'
-      const attrs = `fill="${fill}" stroke="${col[n.s]}" stroke-width="${(n.s === 'next' ? 2.4 : 1.4) * u}"`
-      g += n.k === 'mastery'
-        ? `<rect x="${n.x - r}" y="${n.y - r}" width="${2 * r}" height="${2 * r}" transform="rotate(45 ${n.x} ${n.y})" ${attrs}/>`
-        : `<circle cx="${n.x}" cy="${n.y}" r="${r}" ${attrs}/>`
-      if (n.i) g += `<circle cx="${n.x}" cy="${n.y}" r="${9.5 * u}" fill="var(--next)"/><text x="${n.x}" y="${n.y + 3.8 * u}" font-size="${11 * u}" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-weight="500" fill="var(--scene)">${n.i}</text>`
-      const named = n.s === 'next' || n.s === 'refund' || (n.k !== 'small' && n.k !== 'start' && n.k !== 'mastery' && n.s !== 'other')
-      if (named) g += `<text x="${n.x}" y="${n.y - r - 5 * u}" font-size="${10 * u}" text-anchor="middle" fill="${n.s === 'next' ? 'var(--next)' : n.s === 'refund' ? 'var(--refund)' : n.s === 'alloc' ? 'var(--alloc)' : 'var(--dim)'}" font-weight="${n.s === 'next' ? 600 : 400}">${esc(n.n.split(' → ')[0])}</text>`
-    }
-    return `<svg id="tree" class="${zoom > 1 ? 'zoomed' : ''}${drag ? ' dragging' : ''}" viewBox="${x0} ${y0} ${w} ${h}" role="img" aria-label="Mini passive tree">${g}</svg>`
-  }
+  let cam = MiniTree.camera(1)
+  try { cam = MiniTree.camera(Number(localStorage.getItem('zoom'))) } catch {}
+  const keepZoom = () => { try { localStorage.setItem('zoom', cam.zoom) } catch {} }
 
   function render(v) {
     const panel = document.getElementById('panel')
@@ -105,82 +56,49 @@
     }
     const refunds = v.refunds.length ? `<span class="refund">Refund: ${v.refunds.map(esc).join(', ')}</span>` : '<span>Refund: none</span>'
     const legend = v.next.length
-      ? `<span><span style="color:var(--next)">●</span> next ${v.next.length} numbered · gold = taken${v.refunds.length ? ' · <span style="color:var(--refund)">red = refund</span>' : ''} · dashed = later${zoom > 1 ? ` · ×${zoom.toFixed(1)}` : ''}</span>`
+      ? `<span><span style="color:var(--next)">●</span> next ${v.next.length} numbered · gold = taken${v.refunds.length ? ' · <span style="color:var(--refund)">red = refund</span>' : ''} · dashed = later${cam.zoom > 1 ? ` · ×${cam.zoom.toFixed(1)}` : ''}</span>`
       : '<span style="color:var(--alloc)">Spec complete</span>'
     panel.innerHTML = `
-      <div class="hd"><h1>${esc(v.spec)}</h1><span>${v.done} / ${v.total}</span></div>
+      <div class="hd" title="Drag to move the panel"><h1>${esc(v.spec)}</h1><span>${v.done} / ${v.total}</span></div>
       <div class="bar"><i style="width:${v.total ? 100 * v.done / v.total : 0}%"></i></div>
-      ${tree(v, 392)}
-      <div class="meta">${legend}${refunds}${v.notices.map(n => `<span>${esc(n)}</span>`).join('')}${warn}<span class="keys">⌥P hide · scroll to zoom, drag to move · ⌥0 whole spec</span></div>`
+      ${MiniTree.draw(v, 392, 0.72, cam)}
+      <div class="meta">${legend}${refunds}${v.notices.map(n => `<span>${esc(n)}</span>`).join('')}${warn}<span class="keys">⌥P hide · scroll to zoom, drag to move · drag the title to move the panel</span></div>`
   }
 
   let view = null
+  const panel = document.getElementById('panel')
   // the window follows the panel's height (plus its 8px margins)
   let fitted = 0
   new ResizeObserver(() => {
-    const h = Math.ceil(document.getElementById('panel').getBoundingClientRect().height) + 16
+    const h = Math.ceil(panel.getBoundingClientRect().height) + 16
     if (h !== fitted) { fitted = h; invoke('fit_panel', { height: h }) }
-  }).observe(document.getElementById('panel'))
+  }).observe(panel)
   invoke('initial_status').then(s => { permission = s.permission; render(view) })
   listen('status', e => { permission = e.payload.permission })
   invoke('panel_view').then(v => { view = v; render(view) })
   listen('plan', e => { view = e.payload; render(view) })
-  listen('zoom', e => {
-    zoom = e.payload === 0 ? 1 : clampZoom(zoom * (e.payload > 0 ? 1.5 : 1 / 1.5))
-    if (zoom === 1) center = null
-    keepZoom()
-    render(view)
-  })
-  listen('pan', e => {
-    if (zoom === 1 || !frame) return
-    const [dx, dy] = e.payload
-    // a third of the view per press
-    center = [frame.cx + dx * frame.w / 3, frame.cy + dy * frame.h / 3]
-    render(view)
-  })
+  listen('zoom', e => { MiniTree.key(cam, e.payload); keepZoom(); render(view) })
+  listen('pan', e => { MiniTree.pan(cam, e.payload); render(view) })
+  MiniTree.attach(panel, cam, () => render(view), keepZoom)
 
-  // the mouse: scroll zooms around the pointer, dragging moves the zoomed view
-  let queued = false
-  const redraw = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; render(view) }) } }
-  const panel = document.getElementById('panel')
-  // the point of the tree under the pointer, and where the pointer sits in the view (0–1)
-  function under(e) {
-    const box = document.getElementById('tree').getBoundingClientRect()
-    const fx = (e.clientX - box.left) / box.width, fy = (e.clientY - box.top) / box.height
-    return { fx, fy, x: frame.x0 + fx * frame.w, y: frame.y0 + fy * frame.h, box }
-  }
-  panel.addEventListener('wheel', e => {
-    if (!view || !frame || !e.target.closest('#tree')) return
-    e.preventDefault()
-    const p = under(e)
-    const before = zoom
-    zoom = clampZoom(zoom * Math.exp(-e.deltaY * (e.deltaMode ? 0.05 : 0.002)))
-    if (zoom === before) return
-    if (zoom === 1) {
-      center = null
-    } else {
-      // keep the point under the pointer still
-      const w = frame.w * before / zoom, h = frame.h * before / zoom
-      center = [p.x - p.fx * w + w / 2, p.y - p.fy * h + h / 2]
-    }
-    keepZoom()
-    redraw()
-  }, { passive: false })
-  let drag = null
+  // dragging the title moves the panel within the game window; the app remembers the spot
+  let moving = null
   panel.addEventListener('pointerdown', e => {
-    if (zoom === 1 || !frame || !e.target.closest('#tree')) return
-    drag = { x: e.clientX, y: e.clientY, cx: frame.cx, cy: frame.cy, scale: frame.w / under(e).box.width }
+    if (e.button !== 0 || !e.target.closest('.hd')) return
+    moving = { x: e.screenX, y: e.screenY }
     panel.setPointerCapture(e.pointerId)
-    redraw()
+    invoke('drag_panel', { phase: 'start', dx: 0, dy: 0 })
   })
   panel.addEventListener('pointermove', e => {
-    if (!drag) return
-    center = [drag.cx - (e.clientX - drag.x) * drag.scale, drag.cy - (e.clientY - drag.y) * drag.scale]
-    redraw()
+    if (moving) invoke('drag_panel', { phase: 'move', dx: e.screenX - moving.x, dy: e.screenY - moving.y })
   })
-  const endDrag = () => { if (drag) { drag = null; redraw() } }
-  panel.addEventListener('pointerup', endDrag)
-  panel.addEventListener('pointercancel', endDrag)
+  const endMove = e => {
+    if (!moving) return
+    invoke('drag_panel', { phase: 'end', dx: e.screenX - moving.x, dy: e.screenY - moving.y })
+    moving = null
+  }
+  panel.addEventListener('pointerup', endMove)
+  panel.addEventListener('pointercancel', endMove)
 </script>
 </body>
 </html>

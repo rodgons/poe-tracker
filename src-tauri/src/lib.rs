@@ -11,14 +11,16 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewWindow,
+    AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, State, WebviewWindow,
 };
 
 mod clientlog;
 mod foreground;
+mod gamewin;
 mod keys;
 #[cfg(target_os = "macos")]
 mod macos;
+mod placement;
 mod pob;
 mod poeapi;
 mod store;
@@ -35,6 +37,10 @@ struct App {
     playing: Option<String>,
     /// what the last Re-sync did, shown until the next tick
     synced: Option<String>,
+    /// the game window's frame while PoE is frontmost
+    frame: Option<gamewin::Frame>,
+    /// where the Corner panel was (logical) when the player started dragging it
+    drag_from: Option<(f64, f64)>,
 }
 
 impl App {
@@ -87,7 +93,8 @@ pub enum Msg {
     Pan(i8, i8),
     /// the tray's Show/Hide panel item
     TogglePanel,
-    Frontmost(String),
+    /// the frontmost app, and its window frame when it's the game
+    Frontmost(String, Option<gamewin::Frame>),
 }
 
 #[derive(Clone, Serialize)]
@@ -117,6 +124,33 @@ fn place_in_corner(win: &WebviewWindow) {
     let _ = win.set_position(PhysicalPosition::new(x, y));
 }
 
+/// The game frame in logical pixels, for the panel window's scale.
+fn logical_frame(win: &WebviewWindow, frame: gamewin::Frame) -> gamewin::Frame {
+    let scale = if gamewin::LOGICAL { 1.0 } else { win.scale_factor().unwrap_or(1.0) };
+    gamewin::Frame { x: frame.x / scale, y: frame.y / scale, w: frame.w / scale, h: frame.h / scale }
+}
+
+fn logical_size(win: &WebviewWindow) -> (f64, f64) {
+    let scale = win.scale_factor().unwrap_or(1.0);
+    win.outer_size().map_or((436.0, 520.0), |s| (s.width as f64 / scale, s.height as f64 / scale))
+}
+
+/// Puts the Corner panel inside the game window at the player's spot (top-right by
+/// default), or in the screen corner when the game window can't be found.
+fn position_panel(app: &AppHandle, win: &WebviewWindow) {
+    let (frame, spot, dragging) = {
+        let st = app.state::<AppState>();
+        let st = st.lock().unwrap();
+        (st.frame, st.saved.panel_spot, st.drag_from.is_some())
+    };
+    if dragging {
+        return;
+    }
+    let Some(frame) = frame else { return place_in_corner(win) };
+    let (x, y) = placement::place(logical_frame(win, frame), logical_size(win), spot);
+    let _ = win.set_position(LogicalPosition::new(x, y));
+}
+
 /// Clicking the panel mustn't take focus from the game.
 #[cfg(target_os = "windows")]
 fn no_activate(win: &WebviewWindow) {
@@ -144,8 +178,8 @@ fn hide(win: &WebviewWindow) {
 
 fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
     let mut presses = 0;
-    // shown at launch so the player can see the app is running
-    let mut visible = true;
+    // never shown outside the game, so not at launch either: the tray icon says it's running
+    let mut visible = false;
     let mut frontmost = foreground::frontmost_app();
     let mut key = "none yet";
     for msg in rx {
@@ -161,7 +195,7 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                 key = "Esc";
                 visible = false;
             }
-            Msg::TogglePanel => visible = !visible,
+            Msg::TogglePanel if in_poe || visible => visible = !visible,
             Msg::Zoom(step) if visible => {
                 let _ = app.emit_to("corner", "zoom", step);
                 continue;
@@ -170,8 +204,15 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                 let _ = app.emit_to("corner", "pan", (dx, dy));
                 continue;
             }
-            Msg::Frontmost(name) => {
-                if name == frontmost {
+            Msg::Frontmost(name, frame) => {
+                let moved = {
+                    let st = app.state::<AppState>();
+                    let mut st = st.lock().unwrap();
+                    let moved = st.frame != frame;
+                    st.frame = frame;
+                    moved
+                };
+                if name == frontmost && !(moved && visible) {
                     continue;
                 }
                 // leaving the game hides the panel; coming back doesn't reopen it
@@ -193,7 +234,12 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
             let Some(win) = handle.get_webview_window("corner") else { return };
-            if status.visible { show(&win) } else { hide(&win) }
+            if status.visible {
+                position_panel(&handle, &win);
+                show(&win)
+            } else {
+                hide(&win)
+            }
             let _ = win.emit("status", status);
         });
     }
@@ -201,7 +247,9 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
 
 fn poll_frontmost(tx: mpsc::Sender<Msg>) {
     loop {
-        if tx.send(Msg::Frontmost(foreground::frontmost_app())).is_err() {
+        let app = foreground::frontmost_app();
+        let frame = if foreground::is_poe(&app) { gamewin::frontmost_frame() } else { None };
+        if tx.send(Msg::Frontmost(app, frame)).is_err() {
             return;
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -278,7 +326,7 @@ fn on_log_line(handle: &AppHandle, line: &str) {
     if changed {
         app.synced = None;
         let _ = store::save(&app.path, &app.saved);
-        let _ = handle.emit_to("corner", "plan", panel_view_of(app));
+        let _ = handle.emit("plan", panel_view_of(app));
     }
 }
 
@@ -291,7 +339,7 @@ fn follow_log(handle: AppHandle) {
             let mut app = state.lock().unwrap();
             if app.watching != path {
                 app.watching = path.clone();
-                let _ = handle.emit_to("corner", "plan", panel_view_of(&app));
+                let _ = handle.emit("plan", panel_view_of(&app));
             }
         }
         let Some(path) = path else {
@@ -431,7 +479,7 @@ async fn save_setup(
     st.playing = None;
     st.synced = None;
     store::save(&st.path, &st.saved)?;
-    let _ = app.emit_to("corner", "plan", panel_view_of(st));
+    let _ = app.emit("plan", panel_view_of(st));
     if let Some(win) = app.get_webview_window("setup") {
         let _ = win.hide();
     }
@@ -462,7 +510,7 @@ fn resync(app: &AppHandle) {
             st.playing = None;
             st.synced = Some(format!("Re-synced {character} from pathofexile.com"));
             let _ = store::save(&st.path, &st.saved);
-            let _ = app.emit_to("corner", "plan", panel_view_of(&st));
+            let _ = app.emit("plan", panel_view_of(&st));
         }
         Err(e) => {
             let _ = app.emit_to("setup", "resync_error", format!("Re-sync failed: {e}"));
@@ -481,11 +529,103 @@ fn fit_panel(height: f64, app: AppHandle) {
     let Ok(size) = win.outer_size() else { return };
     let width = size.width as f64 / scale;
     let _ = win.set_size(tauri::LogicalSize::new(width, height.clamp(80.0, 900.0)));
+    // a panel near the bottom of the game window has to stay inside it
+    position_panel(&app, &win);
+}
+
+/// The player dragging the Corner panel by its title: `dx`, `dy` are logical pixels
+/// since the drag started. Dropping it remembers the spot within the game window.
+#[tauri::command]
+fn drag_panel(phase: String, dx: f64, dy: f64, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let Some(win) = app.get_webview_window("corner") else { return Ok(()) };
+    // window queries first, so the app state is never locked while waiting on the window
+    let scale = win.scale_factor().map_err(|e| e.to_string())?;
+    let pos = win.outer_position().map_err(|e| e.to_string())?;
+    let size = logical_size(&win);
+    let mut st = state.lock().unwrap();
+    if phase == "start" {
+        st.drag_from = Some((pos.x as f64 / scale, pos.y as f64 / scale));
+        return Ok(());
+    }
+    let Some(from) = st.drag_from else { return Ok(()) };
+    let mut at = (from.0 + dx, from.1 + dy);
+    let frame = st.frame.map(|f| {
+        let s = if gamewin::LOGICAL { 1.0 } else { scale };
+        gamewin::Frame { x: f.x / s, y: f.y / s, w: f.w / s, h: f.h / s }
+    });
+    if let Some(frame) = frame {
+        at = placement::place(frame, size, Some(placement::spot_of(frame, size, at)));
+    }
+    if phase == "end" {
+        st.drag_from = None;
+        if let Some(frame) = frame {
+            st.saved.panel_spot = Some(placement::spot_of(frame, size, at));
+            store::save(&st.path, &st.saved)?;
+        }
+    }
+    drop(st);
+    let _ = win.set_position(LogicalPosition::new(at.0, at.1));
+    Ok(())
 }
 
 #[tauri::command]
 fn panel_view(state: State<'_, AppState>) -> Option<tree::PanelView> {
     panel_view_of(&state.lock().unwrap())
+}
+
+/// The Build window: everything about the current Tree spec, away from the game.
+#[derive(Serialize)]
+struct BuildView {
+    view: tree::PanelView,
+    points: Vec<tree::ListedPoint>,
+    specs: Vec<SpecChoice>,
+    spec: usize,
+    character: String,
+}
+
+#[tauri::command]
+fn build_view(state: State<'_, AppState>) -> Option<BuildView> {
+    let app = state.lock().unwrap();
+    let saved = &app.saved;
+    let build = saved.build.as_ref()?;
+    let plan = tree::Plan::new(tree::tree(), build.specs.get(saved.spec)?).ok()?;
+    let allocated: HashSet<u32> = saved.allocated.iter().copied().collect();
+    Some(BuildView {
+        view: panel_view_of(&app)?,
+        points: plan.points(tree::tree(), &allocated),
+        specs: spec_choices(build),
+        spec: saved.spec,
+        character: saved.character.clone(),
+    })
+}
+
+/// Switches the current Tree spec; the Allocated nodes carry over.
+#[tauri::command]
+fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut st = state.lock().unwrap();
+    let title = st.saved.build.as_ref().and_then(|b| b.specs.get(spec)).ok_or("No such tree spec.")?.title.clone();
+    st.saved.spec = spec;
+    // a hand Seed only counted the old spec's points; an import holds them all
+    st.synced = st
+        .saved
+        .account
+        .is_empty()
+        .then(|| format!("Switched to {title}: Re-sync character so your taken points count"));
+    store::save(&st.path, &st.saved)?;
+    let _ = app.emit("plan", panel_view_of(&st));
+    Ok(())
+}
+
+fn open_build(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("build") else { return };
+    #[cfg(target_os = "macos")]
+    {
+        macos::set_dock_icon(true);
+        macos::activate();
+    }
+    let _ = win.show();
+    let _ = win.unminimize();
+    let _ = win.set_focus();
 }
 
 fn open_setup(app: &AppHandle) {
@@ -529,13 +669,16 @@ pub fn run() {
             panel_view,
             choose_log,
             find_characters,
-            fit_panel
+            fit_panel,
+            drag_panel,
+            build_view,
+            set_spec
         ])
         .setup(|app| {
             let path = store::path(app.path().app_config_dir()?);
             let saved = store::load(&path);
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None }));
 
             #[cfg(target_os = "macos")]
             {
@@ -555,13 +698,18 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             no_activate(&win);
 
-            // closing the Setup window only hides it, so the tray can reopen it
-            if let Some(setup) = app.get_webview_window("setup") {
-                let handle = setup.clone();
-                setup.on_window_event(move |e| {
+            // closing the Setup or Build window only hides it, so the tray can reopen it
+            for label in ["setup", "build"] {
+                let Some(win) = app.get_webview_window(label) else { continue };
+                let handle = win.clone();
+                win.on_window_event(move |e| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = e {
                         api.prevent_close();
                         let _ = handle.hide();
+                        #[cfg(target_os = "macos")]
+                        if handle.label() == "build" {
+                            macos::set_dock_icon(false);
+                        }
                     }
                 });
             }
@@ -569,24 +717,27 @@ pub fn run() {
             let (tx, rx) = mpsc::channel();
             let tray_tx = tx.clone();
             let panel_item = MenuItem::with_id(app, "panel", "Show/Hide panel", true, None::<&str>)?;
+            let build_item = MenuItem::with_id(app, "build", "Open build…", true, None::<&str>)?;
             let setup_item = MenuItem::with_id(app, "setup", "Set up build…", true, None::<&str>)?;
             let resync_item = MenuItem::with_id(app, "resync", "Re-sync character…", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit POE Tracker", true, None::<&str>)?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("POE Tracker")
-                .menu(&Menu::with_items(app, &[&panel_item, &setup_item, &resync_item, &quit])?)
+                .menu(&Menu::with_items(app, &[&panel_item, &build_item, &setup_item, &resync_item, &quit])?)
                 .on_menu_event(move |app, e| match e.id().as_ref() {
                     "panel" => {
                         let _ = tray_tx.send(Msg::TogglePanel);
                     }
+                    "build" => open_build(app),
                     "setup" => open_setup(app),
                     "resync" => resync(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
                 .build(app)?;
-            if first_run {
+            // the panel no longer shows at launch, so a missing permission is told in setup
+            if first_run || permission().contains("NOT") {
                 open_setup(app.handle());
             }
 
