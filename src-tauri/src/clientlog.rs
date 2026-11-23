@@ -11,6 +11,8 @@ pub enum Event {
     Unallocated { id: String, name: String },
     /// a level-up line: tells which character is playing
     LevelUp { character: String, level: u32 },
+    /// the player changed area
+    Entered,
 }
 
 /// Turns one log line into an event, if it's one the app uses.
@@ -28,8 +30,12 @@ pub fn parse(line: &str) -> Option<Event> {
             return Some(if allocated { Event::Allocated { id, name } } else { Event::Unallocated { id, name } });
         }
     }
-    // ": YourChar (Inquisitor) is now level 80"
+    // ": You have entered The Coast."
     let rest = msg.strip_prefix(": ")?;
+    if rest.starts_with("You have entered ") {
+        return Some(Event::Entered);
+    }
+    // ": YourChar (Inquisitor) is now level 80"
     let (who, level) = rest.rsplit_once(" is now level ")?;
     let level = level.parse().ok()?;
     let character = who.rsplit_once(" (").map_or(who, |(name, _)| name).trim().to_string();
@@ -138,8 +144,13 @@ mod tests {
     }
 
     #[test]
+    fn reads_area_changes() {
+        assert_eq!(parse(&format!("{HEAD}: You have entered Celestial Nebula Hideout.")), Some(Event::Entered));
+    }
+
+    #[test]
     fn ignores_other_lines() {
-        assert_eq!(parse(&format!("{HEAD}: You have entered The Coast.")), None);
+        assert_eq!(parse(&format!("{HEAD}#Someone: You have entered The Coast.")), None);
         assert_eq!(parse(&format!("{HEAD}@From Trader: is now level 5")), None);
         assert_eq!(parse("***** LOG FILE OPENING *****"), None);
     }

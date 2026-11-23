@@ -14,6 +14,8 @@
 
 **Refund**: An Allocated node that the chosen Tree spec doesn't contain, so the player should take it back. Listed apart from the Next points. Ascendancy and cluster jewel nodes are never Refunds; the app leaves them out entirely.
 
+**Pending refund**: An Allocated node the player has clicked to refund in the game but may still Cancel. The game logs the click and nothing on Apply or Cancel, so the node stays Allocated until the next area change, when the app imports the Character from pathofexile.com to settle it (or until a Re-sync, if that import can't run).
+
 **Mini-tree**: A small drawing of the whole Tree spec, showing Allocated nodes, the numbered Next points and the spec's later points, with nearby nodes outside the spec dimmed for context. A picture beside the game, not aligned with the game's own tree.
 
 **Corner panel**: The small panel inside the game window (top-right unless the player drags it elsewhere) that holds the Mini-tree, the Tree spec's progress and any Refunds. Toggled by the Panel hotkey while Path of Exile is the frontmost app, and never shown outside the game. The player can zoom and move its Mini-tree with the mouse, but it never takes the keyboard from the game.

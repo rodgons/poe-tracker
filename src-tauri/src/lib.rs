@@ -41,6 +41,11 @@ struct App {
     frame: Option<gamewin::Frame>,
     /// where the Corner panel was (logical) when the player started dragging it
     drag_from: Option<(f64, f64)>,
+    /// nodes clicked for refund in the game. The log says nothing on Apply or Cancel,
+    /// so they stay Allocated until an import on the next area change settles them.
+    refunding: Vec<u32>,
+    /// that import failed (or there's no account): wait for a Re-sync instead
+    refund_unchecked: bool,
 }
 
 impl App {
@@ -298,6 +303,16 @@ fn panel_view_of(app: &App) -> Option<tree::PanelView> {
     } else if app.watching.is_none() {
         view.notices.push("Client.txt not found: points won't tick. Pick it in Set up build…".into());
     }
+    if !app.refunding.is_empty() {
+        let t = tree::tree();
+        let names: Vec<&str> = app.refunding.iter().filter_map(|n| t.nodes.get(n)).map(|n| n.name.as_str()).collect();
+        let when = if app.refund_unchecked || app.saved.account.is_empty() {
+            "Re-sync character once applied"
+        } else {
+            "checked on pathofexile.com when you change area"
+        };
+        view.notices.insert(0, format!("Refund pending: {} ({when})", names.join(", ")));
+    }
     Some(view)
 }
 
@@ -325,19 +340,32 @@ fn on_log_line(handle: &AppHandle, line: &str) {
                     app.saved.allocated.push(hash);
                     true
                 }
+                // taking back a node that was waiting to be refunded: it stays
+                Some(hash) if app.refunding.contains(&hash) => {
+                    app.refunding.retain(|n| *n != hash);
+                    true
+                }
                 _ => false,
             }
         }
+        // logged on the click, before Apply or Cancel: keep the node until an import says
         clientlog::Event::Unallocated { id, name } => {
             let have = app.saved.allocated.clone();
             match t.node_for_log(&id, &name, have) {
-                Some(hash) => {
-                    let before = app.saved.allocated.len();
-                    app.saved.allocated.retain(|n| *n != hash);
-                    app.saved.allocated.len() != before
+                Some(hash) if app.saved.allocated.contains(&hash) && !app.refunding.contains(&hash) => {
+                    app.refunding.push(hash);
+                    true
                 }
-                None => false,
+                _ => false,
             }
+        }
+        clientlog::Event::Entered => {
+            let s = &app.saved;
+            let spec = s.build.as_ref().and_then(|b| b.specs.get(s.spec));
+            if let Some(spec) = spec.filter(|_| !app.refunding.is_empty() && !app.refund_unchecked && !s.account.is_empty()) {
+                settle_refunds(handle, s.account.clone(), s.character.clone(), spec.clone());
+            }
+            false
         }
     };
     if changed {
@@ -345,6 +373,26 @@ fn on_log_line(handle: &AppHandle, line: &str) {
         let _ = store::save(&app.path, &app.saved);
         let _ = handle.emit("plan", panel_view_of(app));
     }
+}
+
+/// Imports the Character from pathofexile.com to learn which pending refunds were
+/// applied. When it can't, the refunds wait for a Re-sync.
+fn settle_refunds(handle: &AppHandle, account: String, character: String, spec: pob::Spec) {
+    let app = handle.clone();
+    std::thread::spawn(move || {
+        let imported = import_allocated(&account, &character, &spec);
+        let st = app.state::<AppState>();
+        let mut st = st.lock().unwrap();
+        match imported {
+            Ok(allocated) => {
+                st.saved.allocated = allocated;
+                st.refunding.clear();
+                let _ = store::save(&st.path, &st.saved);
+            }
+            Err(_) => st.refund_unchecked = true,
+        }
+        let _ = app.emit("plan", panel_view_of(&st));
+    });
 }
 
 /// Follows Client.txt for the app's lifetime, switching files when the player picks another.
@@ -525,6 +573,8 @@ async fn save_setup(
     st.saved.account = account;
     st.saved.character = character;
     st.saved.allocated = allocated;
+    st.refunding.clear();
+    st.refund_unchecked = false;
     st.saved.points = points.clamp(1, MAX_POINTS);
     // saving (or re-syncing) says the Character is the one playing
     st.playing = None;
@@ -559,6 +609,8 @@ fn resync(app: &AppHandle) {
             let mut st = st.lock().unwrap();
             st.saved.allocated = allocated;
             st.playing = None;
+            st.refunding.clear();
+            st.refund_unchecked = false;
             st.synced = Some(format!("Re-synced {character} from pathofexile.com"));
             let _ = store::save(&st.path, &st.saved);
             let _ = app.emit("plan", panel_view_of(&st));
@@ -746,7 +798,7 @@ pub fn run() {
             let saved = store::load(&path);
             keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false }));
 
             #[cfg(target_os = "macos")]
             {
