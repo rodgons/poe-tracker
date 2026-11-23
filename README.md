@@ -42,8 +42,8 @@ When a Tree spec is complete the panel names the Build's next spec; switch to it
 Tauri v2: Rust in [`src-tauri/`](src-tauri), plain HTML/JS pages in [`ui/`](ui) (no bundler).
 
 ```sh
-npm ci
-npx tauri dev                                    # run the app
+pnpm install
+pnpm tauri dev                                   # run the app
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
