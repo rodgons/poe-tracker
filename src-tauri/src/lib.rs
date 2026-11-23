@@ -192,7 +192,7 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
             // showing needs the game in front; hiding works from anywhere
             Msg::Hotkey if in_poe || visible => {
                 presses += 1;
-                key = "⌥/Alt+P";
+                key = "panel hotkey";
                 visible = !visible;
             }
             Msg::Esc if visible => {
@@ -409,6 +409,24 @@ fn current_setup(state: State<'_, AppState>) -> Setup {
         tree_version: tree::tree().version.clone(),
         log_path: app.watching.clone().or_else(|| app.log_path()).map(|p| p.display().to_string()),
     }
+}
+
+#[tauri::command]
+fn key_binds(state: State<'_, AppState>) -> keys::Binds {
+    state.lock().unwrap().saved.binds.clone()
+}
+
+/// Saves new key binds and listens for them at once; None puts back the defaults.
+#[tauri::command]
+fn set_binds(binds: Option<keys::Binds>, app: AppHandle, state: State<'_, AppState>) -> Result<keys::Binds, String> {
+    let binds = binds.unwrap_or_default();
+    binds.check()?;
+    let mut guard = state.lock().unwrap();
+    guard.saved.binds = binds.clone();
+    store::save(&guard.path, &guard.saved)?;
+    keys::set(binds.clone());
+    let _ = app.emit("binds", &binds);
+    Ok(binds)
 }
 
 /// Lets the player pick Client.txt when it isn't in a usual install folder.
@@ -691,6 +709,8 @@ pub fn run() {
             load_build,
             spec_order,
             current_setup,
+            key_binds,
+            set_binds,
             save_setup,
             panel_view,
             choose_log,
@@ -703,6 +723,7 @@ pub fn run() {
         .setup(|app| {
             let path = store::path(app.path().app_config_dir()?);
             let saved = store::load(&path);
+            keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
             app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None }));
 

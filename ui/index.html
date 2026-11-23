@@ -38,12 +38,13 @@
 <body>
 <div class="panel" id="panel"><p class="empty">Loading…</p></div>
 <script src="minitree.js"></script>
+<script src="keys.js"></script>
 <script>
   const { invoke } = window.__TAURI__.core
   const { listen } = window.__TAURI__.event
   const esc = MiniTree.esc
   let permission = ''
-  const hotkey = navigator.userAgent.includes('Mac') ? '⌥P' : 'Alt+P'
+  let hotkey = KeyLabel.format({ code: 'KeyP', alt: true })
   let cam = MiniTree.camera(1)
   try { cam = MiniTree.camera(Number(localStorage.getItem('zoom'))) } catch {}
   const keepZoom = () => { try { localStorage.setItem('zoom', cam.zoom) } catch {} }
@@ -78,6 +79,9 @@
   listen('status', e => { permission = e.payload.permission })
   invoke('panel_view').then(v => { view = v; render(view) })
   listen('plan', e => { view = e.payload; render(view) })
+  const useBinds = b => { hotkey = KeyLabel.format(b.toggle); render(view) }
+  invoke('key_binds').then(useBinds)
+  listen('binds', e => useBinds(e.payload))
   listen('zoom', e => { MiniTree.key(cam, e.payload); keepZoom(); render(view) })
   listen('pan', e => { MiniTree.pan(cam, e.payload); render(view) })
   MiniTree.attach(panel, cam, () => render(view), keepZoom)

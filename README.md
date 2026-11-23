@@ -25,7 +25,8 @@ Download from [Releases](https://github.com/rodgons/poe-tracker/releases). The b
 2. Paste a PoB export code or a pobb.in / pastebin link and press **Load build**.
 3. Pick the **Tree spec** to follow and type your **Character** name. To import the points it already has, enter your pathofexile.com account (`Name#1234`, Characters tab public) and use **Find characters**; otherwise choose **Set by hand**.
 4. Optionally change **Next points** (how many the Corner panel numbers, 1–15, default 5) and check the **Game log** path; pick `Client.txt` yourself if it wasn't found.
-5. **Save**, switch to Path of Exile and press **⌥P** (macOS) or **Alt+P** (Windows/Linux) to show or hide the Corner panel. Esc or the tray icon hides it too.
+   Under **Key binds**, click an action and press new keys to rebind it (the panel hotkey, hide, zoom and moving the view). They take effect at once; **Reset to defaults** puts them back.
+5. **Save**, switch to Path of Exile and press the panel hotkey, **⌥P** (macOS) or **Alt+P** (Windows/Linux) unless you changed it, to show or hide the Corner panel. Esc or the tray icon hides it too.
 
 When a Tree spec is complete the panel names the Build's next spec; switch to it in **Open build…**.
 

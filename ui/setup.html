@@ -42,13 +42,16 @@
   .path { flex: 1; word-break: break-all; font-family: var(--mono); font-size: 11px; margin: 0; }
   .path.missing { color: var(--bad); font-family: var(--body); font-size: 12px; }
   .err { color: var(--bad); min-height: 1.5em; margin: 4px 0 0; }
+  .binds { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; margin-top: 8px; }
+  .binds button { min-width: 130px; font-family: var(--mono); font-size: 12px; padding: 6px 10px; }
+  .binds button.rec { background: var(--next); color: #1b150e; border-color: var(--next); }
   footer { display: flex; justify-content: flex-end; gap: 8px; align-items: center; }
   footer .err { flex: 1; margin: 0; }
 </style>
 </head>
 <body>
 <h1>Set up build</h1>
-<p class="err" id="permission" hidden>⚠ Input Monitoring is off, so ⌥P can't show the panel. Allow POE Tracker in System Settings → Privacy &amp; Security → Input Monitoring, then reopen the app.</p>
+<p class="err" id="permission" hidden>⚠ Input Monitoring is off, so <span class="toggleKey">⌥P</span> can't show the panel. Allow POE Tracker in System Settings → Privacy &amp; Security → Input Monitoring, then reopen the app.</p>
 
 <section>
   <label for="input">Path of Building build <small>(export code, pobb.in or pastebin link)</small></label>
@@ -79,8 +82,16 @@
   <div class="row"><span class="hint path" id="logPath">Looking…</span><button class="ghost" id="chooseLog">Choose…</button></div>
 </section>
 
+<section>
+  <label>Key binds <small>(click one, then press the new keys)</small></label>
+  <div class="binds" id="binds"></div>
+  <p class="hint" id="bindHint"></p>
+  <div class="row"><button class="ghost" id="resetBinds">Reset to defaults</button><p class="err" id="bindErr" style="flex:1;margin:0"></p></div>
+</section>
+
 <footer><p class="err" id="saveErr"></p><button id="save" disabled>Save</button></footer>
 
+<script src="keys.js"></script>
 <script>
   const { invoke } = window.__TAURI__.core
   const $ = id => document.getElementById(id)
@@ -220,6 +231,46 @@
   })
 
   window.__TAURI__.event.listen('resync_error', e => { setSeed('import'); $('saveErr').textContent = e.payload })
+
+  // Key binds: saved and listened for as soon as they're recorded, apart from Save
+  const actions = [
+    ['toggle', 'Show / hide the Corner panel'], ['hide', 'Hide the panel'],
+    ['zoom_in', 'Zoom in'], ['zoom_out', 'Zoom out'], ['zoom_whole', 'Zoom to the whole spec'],
+    ['pan_left', 'Move view left'], ['pan_right', 'Move view right'], ['pan_up', 'Move view up'], ['pan_down', 'Move view down'],
+  ]
+  let binds = null
+  let recording = null
+  function showBinds() {
+    $('binds').innerHTML = actions.map(([id, label]) =>
+      `<span>${label}</span><button class="ghost${recording === id ? ' rec' : ''}" data-bind="${id}">${recording === id ? 'Press keys…' : esc(KeyLabel.format(binds[id]))}</button>`).join('')
+    document.querySelectorAll('.toggleKey').forEach(e => { e.textContent = KeyLabel.format(binds.toggle) })
+    const bare = actions.filter(([id]) => id !== 'hide' && !['alt', 'ctrl', 'shift', 'meta'].some(m => binds[id][m]))
+    $('bindHint').textContent = bare.length
+      ? `${bare.map(([, l]) => l).join(', ')}: no modifier, so the game gets that key too (the app only listens).`
+      : 'The app only listens: the game still gets every key you press.'
+  }
+  $('binds').onclick = e => {
+    const id = e.target.dataset?.bind
+    if (!id) return
+    recording = recording === id ? null : id
+    $('bindErr').textContent = ''
+    showBinds()
+  }
+  window.addEventListener('keydown', async e => {
+    if (!recording) return
+    e.preventDefault(); e.stopPropagation()
+    if (/^(Shift|Control|Alt|Meta|OS)/.test(e.code) || !e.code) return
+    const next = { ...binds, [recording]: { code: e.code, alt: e.altKey, ctrl: e.ctrlKey, shift: e.shiftKey, meta: e.metaKey } }
+    recording = null
+    try { binds = await invoke('set_binds', { binds: next }) } catch (err) { $('bindErr').textContent = err }
+    showBinds()
+  }, true)
+  $('resetBinds').onclick = async () => {
+    recording = null; $('bindErr').textContent = ''
+    try { binds = await invoke('set_binds', { binds: null }) } catch (err) { $('bindErr').textContent = err }
+    showBinds()
+  }
+  invoke('key_binds').then(b => { binds = b; showBinds() })
 
   invoke('initial_status').then(s => { $('permission').hidden = !s.permission.includes('NOT') })
 
