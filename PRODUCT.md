@@ -22,7 +22,7 @@ Three things together, which a second-screen PoB or a generic overlay can't hone
 
 1. **It tracks itself.** Allocations are read from the game's own Client log, so taken points tick off with no input from the player.
 2. **It lives inside the game.** The Corner panel shows only inside the Path of Exile window, toggled by the Panel hotkey.
-3. **It stays clearly within the game's rules.** It reads the log, the clipboard and its own window only. It never reads game memory, injects code, edits game files or sends input to the game, and it fetches only the player's own pathofexile.com profile.
+3. **It stays clearly within the game's rules.** It reads the log, the clipboard and its own window only. It never reads game memory, injects code, edits game files or sends input to the game. Its only network requests are the player's own pathofexile.com profile and a launch-time update check against its GitHub releases.
 
 ## Operating Context
 
@@ -37,7 +37,8 @@ Three things together, which a second-screen PoB or a generic overlay can't hone
 - Stack: Tauri v2, Rust backend in `src-tauri/`, and plain HTML/JS pages in `ui/` with no bundler and no framework.
 - The Corner panel must never take keyboard focus. While the game is in front, the app takes only its own key binds; every other key, Esc included, reaches the game.
 - The panel is never shown outside the game window.
-- Status: unsigned v0.x test builds. macOS is the platform being tested; Windows and Linux build in CI but are untested. The updater is built in but turned off.
+- Status: unsigned v0.x builds, published as public GitHub releases. macOS is the platform being tested; Windows and Linux build in CI but are untested.
+- Auto-update is on from v0.5.4: it checks once at launch, installs signed updates, and never restarts the app while the Corner panel is showing.
 - Undecided: distribution and any business model beyond free test builds.
 
 ## Brand Commitments

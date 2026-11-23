@@ -35,7 +35,8 @@ When a Tree spec is complete the panel names the Build's next spec; switch to it
 
 - Read the log, the clipboard and our own window only. Never read game memory, inject code or edit game files.
 - Never send input to the game. While it's in front, the app takes its own key binds (the panel hotkey, and zoom/pan while the panel is shown) so the game doesn't also act on them; every other key, Esc included, reaches the game untouched.
-- Only the player's own pathofexile.com profile is fetched: at setup, on Re-sync, and once on the area change after a refund click.
+- Only the player's own pathofexile.com profile is fetched: at setup, on Re-sync, and once on the area change after a refund click. The only other request is the update check (below).
+- **Updates**: from v0.5.4 the app checks this repo's latest release once at launch. If there's a newer one it installs it and restarts right away, or, if the Corner panel is showing, adds **Restart to update** to the tray menu instead. Updates are signed, and the app refuses any that doesn't match its built-in key.
 
 ## Develop
 
@@ -47,7 +48,7 @@ pnpm tauri dev                                   # run the app
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
-Pushing a `task/**` branch builds all three platforms in CI and publishes a prerelease named after the version in `src-tauri/tauri.conf.json`, so bump the version for each new test build. Release builds are signed for Tauri's updater (the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repo secrets) and CI uploads a `latest.json` update manifest with each release. The updater plugin is built in but off: the app never checks for or installs updates. The bundled passive tree comes from [`scripts/extract_tree.py`](scripts/extract_tree.py).
+Pushing a `task/**` branch builds all three platforms in CI and publishes a prerelease named after the version in `src-tauri/tauri.conf.json`, so bump the version for each new test build. Merging to `main` publishes that version as a full release, which is what installed apps update to: the updater reads `releases/latest/download/latest.json`, and GitHub's "latest" skips prereleases. Builds are signed for Tauri's updater (the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repo secrets), and CI uploads the `latest.json` update manifest with each release. A version that was already published as a prerelease must have that prerelease and its tag deleted before merging, or the release stays a prerelease. The bundled passive tree comes from [`scripts/extract_tree.py`](scripts/extract_tree.py).
 
 ## Docs
 

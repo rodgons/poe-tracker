@@ -51,6 +51,8 @@ jobs:
           tauriScript: pnpm tauri
           tagName: v__VERSION__
           releaseName: POE Tracker v__VERSION__
-          releaseBody: Unsigned test build. See the release notes in the issue that asked for it.
-          prerelease: true
+          # task/** branches publish test prereleases; main and v* tags publish the release
+          # the updater follows (releases/latest skips prereleases)
+          releaseBody: ${{ startsWith(github.ref, 'refs/heads/task/') && 'Unsigned test build. See the release notes in the issue that asked for it.' || 'Unsigned build. Installed copies from v0.5.4 on update themselves at launch.' }}
+          prerelease: ${{ startsWith(github.ref, 'refs/heads/task/') }}
           args: ${{ matrix.args }}
