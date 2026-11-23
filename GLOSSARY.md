@@ -22,6 +22,6 @@
 
 **Build window**: The ordinary app window for following the Build away from the game: the whole Tree spec large, every point in order, the Refunds, and the choice of current Tree spec. It shows the Character's progress but never changes which nodes are Allocated.
 
-**Panel hotkey**: The key combination (⌥/Alt+P unless the player rebinds it under Key binds in the Setup window) that toggles the Corner panel. Distinct from the game's own key for opening the passive tree, which the app ignores.
+**Panel hotkey**: The key combination (⌥/Alt+P unless the player rebinds it under Key binds in the Setup window) that toggles the Corner panel. Distinct from the game's own key for opening the passive tree, which the app ignores. While the game is in front the app takes the Panel hotkey from it, because the game ignores modifiers and would otherwise read ⌥/Alt+P as P.
 
 **Client log**: The `Client.txt` file the game appends to as things happen; the source of live allocation events.

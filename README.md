@@ -33,7 +33,7 @@ When a Tree spec is complete the panel names the Build's next spec; switch to it
 ## Ground rules
 
 - Read the log, the clipboard and our own window only. Never read game memory, inject code or edit game files.
-- Never send input to the game. The key hook only listens.
+- Never send input to the game. While it's in front, the app takes its own key binds (the panel hotkey, and zoom/pan while the panel is shown) so the game doesn't also act on them; every other key, Esc included, reaches the game untouched.
 - Only the player's own pathofexile.com profile is fetched, and only when they ask (setup or Re-sync).
 
 ## Develop

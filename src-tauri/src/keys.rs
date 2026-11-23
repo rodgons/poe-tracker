@@ -1,9 +1,18 @@
-// Listen-only key hook: observes the player's key binds (by default the panel hotkey
-// Alt/Option+P, the zoom keys Alt/Option + = - 0, panning Alt/Option + arrows and Esc),
-// never consumes or simulates keys.
+// The player's key binds (by default the panel hotkey Alt/Option+P, the zoom keys
+// Alt/Option + = - 0, panning Alt/Option + arrows and Esc). A listen-only hook observes
+// them; while the game is in front the toggle (and, with the panel shown, zoom and pan)
+// are also registered as OS hot keys, so the game never sees them. The game ignores
+// modifiers, so without that ⌥P would also open its passive tree. Nothing is ever
+// simulated or sent to the game, and Esc always reaches it.
 use rdev::{listen, EventType, Key};
 use serde::{Deserialize, Serialize};
-use std::sync::{mpsc::Sender, LazyLock, RwLock};
+use std::sync::{
+    atomic::{AtomicU16, Ordering},
+    mpsc::Sender,
+    LazyLock, RwLock,
+};
+use tauri::AppHandle;
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
 use crate::Msg;
 
@@ -93,9 +102,70 @@ impl Binds {
 
 static BINDS: LazyLock<RwLock<Binds>> = LazyLock::new(|| RwLock::new(Binds::default()));
 
+/// Binds the OS is delivering as hot keys, bit i for `Binds::all()[i]`. The hook
+/// leaves those alone so they don't fire twice.
+static GRABBED: AtomicU16 = AtomicU16::new(0);
+
+/// Bits of `Binds::all()`: the toggle, then zoom and pan; hide (Esc) is never taken from the game.
+pub const TOGGLE: u16 = 1;
+pub const VIEW: u16 = 0b1_1111_1100;
+
 /// Swaps the binds the hook listens for; takes effect on the next key press.
 pub fn set(binds: Binds) {
     *BINDS.write().unwrap() = binds;
+}
+
+fn shortcut(b: &Bind) -> Option<Shortcut> {
+    let code: Code = b.code.parse().ok()?;
+    let mut mods = Modifiers::empty();
+    mods.set(Modifiers::ALT, b.alt);
+    mods.set(Modifiers::CONTROL, b.ctrl);
+    mods.set(Modifiers::SHIFT, b.shift);
+    mods.set(Modifiers::META, b.meta);
+    Some(Shortcut::new(Some(mods), code))
+}
+
+/// The message for a hot key the OS delivered, when it's one of the grabbed binds.
+pub fn grabbed_message(pressed: &Shortcut) -> Option<Msg> {
+    let grabbed = GRABBED.load(Ordering::Relaxed);
+    let binds = BINDS.read().unwrap();
+    binds
+        .all()
+        .into_iter()
+        .enumerate()
+        .find(|(i, (b, _))| grabbed & 1 << i != 0 && shortcut(b).as_ref() == Some(pressed))
+        .map(|(_, (_, msg))| msg)
+}
+
+/// Registers the wanted binds (bits of `Binds::all()`) as OS hot keys and drops the
+/// others. A bind the OS refuses (another app holds it, Wayland) stays with the hook.
+/// Blocks on the main thread, so never call it from there.
+pub fn grab(app: &AppHandle, want: u16) {
+    let had = GRABBED.load(Ordering::Relaxed);
+    if want == had {
+        return;
+    }
+    let os = app.global_shortcut();
+    let binds = BINDS.read().unwrap().clone();
+    let mut now = had;
+    for (i, (b, _)) in binds.all().iter().enumerate() {
+        let bit = 1 << i;
+        let Some(s) = shortcut(b) else { continue };
+        if had & bit != 0 && want & bit == 0 {
+            let _ = os.unregister(s);
+            now &= !bit;
+        } else if had & bit == 0 && want & bit != 0 && os.register(s).is_ok() {
+            now |= bit;
+        }
+    }
+    GRABBED.store(now, Ordering::Relaxed);
+}
+
+/// Drops every hot key and swaps in new binds; the next `grab` takes them.
+pub fn rebind(app: &AppHandle, binds: Binds) {
+    let _ = app.global_shortcut().unregister_all();
+    GRABBED.store(0, Ordering::Relaxed);
+    set(binds);
 }
 
 /// The web `KeyboardEvent.code` of a key; None for modifiers and unknown keys.
@@ -178,10 +248,13 @@ pub fn spawn(tx: Sender<Msg>) {
                 let Some(code) = web_code(key) else { return };
                 // the callback runs inside the OS hook: hand off and return at once
                 let binds = BINDS.read().unwrap();
-                let hit = binds.all().into_iter().find(|(b, _)| {
-                    same_key(&b.code, &code) && (b.alt, b.ctrl, b.shift, b.meta) == (alt, ctrl, shift, meta)
+                let grabbed = GRABBED.load(Ordering::Relaxed);
+                let hit = binds.all().into_iter().enumerate().find(|(i, (b, _))| {
+                    grabbed & 1 << i == 0
+                        && same_key(&b.code, &code)
+                        && (b.alt, b.ctrl, b.shift, b.meta) == (alt, ctrl, shift, meta)
                 });
-                if let Some((_, msg)) = hit {
+                if let Some((_, (_, msg))) = hit {
                     let _ = tx.send(msg);
                 }
             }
@@ -207,6 +280,14 @@ mod tests {
         assert_eq!(web_code(Key::Escape).as_deref(), Some("Escape"));
         assert_eq!(web_code(Key::F5).as_deref(), Some("F5"));
         assert_eq!(web_code(Key::Alt), None);
+    }
+
+    #[test]
+    fn binds_become_os_hot_keys() {
+        let b = Binds::default();
+        assert_eq!(shortcut(&b.toggle), Some(Shortcut::new(Some(Modifiers::ALT), Code::KeyP)));
+        assert_eq!(shortcut(&b.pan_left), Some(Shortcut::new(Some(Modifiers::ALT), Code::ArrowLeft)));
+        assert_eq!(shortcut(&b.zoom_whole), Some(Shortcut::new(Some(Modifiers::ALT), Code::Digit0)));
     }
 
     #[test]

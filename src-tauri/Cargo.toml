@@ -1,6 +1,6 @@
 [package]
 name = "poe-tracker"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 
 [lib]
@@ -17,6 +17,8 @@ tauri-plugin-dialog = "2"
 # update groundwork, kept off: registered so release builds carry signed update
 # artifacts, but nothing ever checks for or installs an update
 tauri-plugin-updater = "2"
+# the key binds as real OS hot keys while the game is in front, so the game never sees them
+tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # build codes: URL-safe base64 of zlib-compressed XML

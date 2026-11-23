@@ -99,7 +99,12 @@ pub enum Msg {
     TogglePanel,
     /// the frontmost app, and its window frame when it's the game
     Frontmost(String, Option<gamewin::Frame>),
+    /// the player saved new key binds
+    Rebind(keys::Binds),
 }
+
+/// Where key presses go: the toggle loop.
+struct KeyTx(Mutex<mpsc::Sender<Msg>>);
 
 #[derive(Clone, Serialize)]
 struct Status {
@@ -225,8 +230,12 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                 }
                 frontmost = name;
             }
+            Msg::Rebind(binds) => keys::rebind(&app, binds),
             _ => continue,
         }
+        // take the binds from the game only while it's in front (zoom and pan only with the panel shown)
+        let want = if foreground::is_poe(&frontmost) { keys::TOGGLE | if visible { keys::VIEW } else { 0 } } else { 0 };
+        keys::grab(&app, want);
         let status = Status {
             key,
             presses,
@@ -424,7 +433,7 @@ fn set_binds(binds: Option<keys::Binds>, app: AppHandle, state: State<'_, AppSta
     let mut guard = state.lock().unwrap();
     guard.saved.binds = binds.clone();
     store::save(&guard.path, &guard.saved)?;
-    keys::set(binds.clone());
+    let _ = app.state::<KeyTx>().0.lock().unwrap().send(Msg::Rebind(binds.clone()));
     let _ = app.emit("binds", &binds);
     Ok(binds)
 }
@@ -702,6 +711,18 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        return;
+                    }
+                    if let (Some(msg), Some(tx)) = (keys::grabbed_message(shortcut), app.try_state::<KeyTx>()) {
+                        let _ = tx.0.lock().unwrap().send(msg);
+                    }
+                })
+                .build(),
+        )
         // off: no capability lets a page call it and the app never checks (see the v0.5 ticket)
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
@@ -763,6 +784,7 @@ pub fn run() {
 
             let (tx, rx) = mpsc::channel();
             let tray_tx = tx.clone();
+            app.manage(KeyTx(Mutex::new(tx.clone())));
             let panel_item = MenuItem::with_id(app, "panel", "Show/Hide panel", true, None::<&str>)?;
             let build_item = MenuItem::with_id(app, "build", "Open build…", true, None::<&str>)?;
             let setup_item = MenuItem::with_id(app, "setup", "Set up build…", true, None::<&str>)?;

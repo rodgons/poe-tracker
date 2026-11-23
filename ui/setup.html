@@ -246,8 +246,8 @@
     document.querySelectorAll('.toggleKey').forEach(e => { e.textContent = KeyLabel.format(binds.toggle) })
     const bare = actions.filter(([id]) => id !== 'hide' && !['alt', 'ctrl', 'shift', 'meta'].some(m => binds[id][m]))
     $('bindHint').textContent = bare.length
-      ? `${bare.map(([, l]) => l).join(', ')}: no modifier, so the game gets that key too (the app only listens).`
-      : 'The app only listens: the game still gets every key you press.'
+      ? `While Path of Exile is in front these keys go to the app, not the game. ${bare.map(([, l]) => l).join(', ')} has no modifier, so the game loses that key then.`
+      : 'While Path of Exile is in front these keys go to the app, not the game (Esc still reaches the game).'
   }
   $('binds').onclick = e => {
     const id = e.target.dataset?.bind
