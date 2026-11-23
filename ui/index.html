@@ -58,7 +58,7 @@
     const refunds = v.refunds.length ? `<span class="refund">Refund: ${v.refunds.map(esc).join(', ')}</span>` : '<span>Refund: none</span>'
     const legend = v.next.length
       ? `<span><span style="color:var(--next)">●</span> next ${v.next.length} numbered · gold = taken${v.refunds.length ? ' · <span style="color:var(--refund)">red = refund</span>' : ''} · dashed = later${cam.zoom > 1 ? ` · ×${cam.zoom.toFixed(1)}` : ''}</span>`
-      : '<span style="color:var(--alloc)">Spec complete</span>'
+      : `<span style="color:var(--alloc)">Spec complete${v.next_spec ? ` — next: ${esc(v.next_spec)}. Switch in Open build…` : ''}</span>`
     panel.innerHTML = `
       <div class="hd" title="Drag to move the panel"><h1>${esc(v.spec)}</h1><span>${v.done} / ${v.total}</span></div>
       <div class="bar"><i style="width:${v.total ? 100 * v.done / v.total : 0}%"></i></div>

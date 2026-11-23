@@ -80,6 +80,8 @@ struct Setup {
     character: String,
     spec: usize,
     taken: usize,
+    /// how many Next points the panel shows
+    points: usize,
     specs: Vec<SpecChoice>,
     tree_version: String,
     /// the Client.txt being followed; None when none was found
@@ -258,6 +260,9 @@ fn poll_frontmost(tx: mpsc::Sender<Msg>) {
     }
 }
 
+/// the most Next points the Setup window lets the panel number
+const MAX_POINTS: usize = 15;
+
 fn spec_choices(build: &pob::Build) -> Vec<SpecChoice> {
     build
         .specs
@@ -275,6 +280,7 @@ fn panel_view_of(app: &App) -> Option<tree::PanelView> {
     let plan = tree::Plan::new(tree::tree(), spec).ok()?;
     let allocated: HashSet<u32> = saved.allocated.iter().copied().collect();
     let mut view = plan.view(tree::tree(), &allocated, saved.points);
+    view.next_spec = saved.build.as_ref()?.specs.get(saved.spec + 1).map(|s| s.title.clone());
     if let Some(note) = &app.synced {
         view.notices.insert(0, note.clone());
     }
@@ -398,6 +404,7 @@ fn current_setup(state: State<'_, AppState>) -> Setup {
         character: saved.character.clone(),
         spec: saved.spec,
         taken: panel_view_of(&app).map_or(0, |v| v.done),
+        points: saved.points,
         specs: saved.build.as_ref().map(spec_choices).unwrap_or_default(),
         tree_version: tree::tree().version.clone(),
         log_path: app.watching.clone().or_else(|| app.log_path()).map(|p| p.display().to_string()),
@@ -450,6 +457,7 @@ async fn save_setup(
     account: String,
     character: String,
     taken: Option<usize>,
+    points: usize,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
@@ -490,6 +498,7 @@ async fn save_setup(
     st.saved.account = account;
     st.saved.character = character;
     st.saved.allocated = allocated;
+    st.saved.points = points.clamp(1, MAX_POINTS);
     // saving (or re-syncing) says the Character is the one playing
     st.playing = None;
     st.synced = None;
@@ -675,6 +684,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // off: no capability lets a page call it and the app never checks (see the v0.5 ticket)
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             initial_status,
             load_build,

@@ -19,6 +19,16 @@ Download from [Releases](https://github.com/rodgons/poe-tracker/releases). The b
 - **Windows**: run the `-setup.exe` and choose "More info → Run anyway" if SmartScreen warns.
 - **Linux**: make the `.AppImage` executable and run it (X11 or XWayland).
 
+## First run
+
+1. Open **Set up build…** from the menu bar / tray icon (it also opens by itself on first launch).
+2. Paste a PoB export code or a pobb.in / pastebin link and press **Load build**.
+3. Pick the **Tree spec** to follow and type your **Character** name. To import the points it already has, enter your pathofexile.com account (`Name#1234`, Characters tab public) and use **Find characters**; otherwise choose **Set by hand**.
+4. Optionally change **Next points** (how many the Corner panel numbers, 1–15, default 5) and check the **Game log** path; pick `Client.txt` yourself if it wasn't found.
+5. **Save**, switch to Path of Exile and press **⌥P** (macOS) or **Alt+P** (Windows/Linux) to show or hide the Corner panel. Esc or the tray icon hides it too.
+
+When a Tree spec is complete the panel names the Build's next spec; switch to it in **Open build…**.
+
 ## Ground rules
 
 - Read the log, the clipboard and our own window only. Never read game memory, inject code or edit game files.
@@ -35,7 +45,7 @@ npx tauri dev                                    # run the app
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
-Pushing a `task/**` branch builds all three platforms in CI and publishes a prerelease named after the version in `src-tauri/tauri.conf.json`, so bump the version for each new test build. The bundled passive tree comes from [`scripts/extract_tree.py`](scripts/extract_tree.py).
+Pushing a `task/**` branch builds all three platforms in CI and publishes a prerelease named after the version in `src-tauri/tauri.conf.json`, so bump the version for each new test build. Release builds are signed for Tauri's updater (the `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repo secrets) and CI uploads a `latest.json` update manifest with each release. The updater plugin is built in but off: the app never checks for or installs updates. The bundled passive tree comes from [`scripts/extract_tree.py`](scripts/extract_tree.py).
 
 ## Docs
 

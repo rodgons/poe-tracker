@@ -73,7 +73,9 @@
 </section>
 
 <section>
-  <label>Game log <small>(Client.txt, read only, so points tick off as you take them)</small></label>
+  <label for="points">Next points <small>(how many the Corner panel numbers)</small></label>
+  <div class="row"><input type="number" id="points" min="1" max="15" value="5"></div>
+  <label style="margin-top:12px">Game log <small>(Client.txt, read only, so points tick off as you take them)</small></label>
   <div class="row"><span class="hint path" id="logPath">Looking…</span><button class="ghost" id="chooseLog">Choose…</button></div>
 </section>
 
@@ -189,6 +191,7 @@
         account: $('account').value,
         character: $('character').value,
         taken: importing ? null : Math.max(0, Math.min(order.length, Number($('taken').value) || 0)),
+        points: Math.max(1, Math.min(15, Number($('points').value) || 5)),
       })
       loadedHere = false
     } catch (e) {
@@ -227,6 +230,7 @@
     $('character').value = s.character
     setSeed(s.account ? 'import' : 'hand')
     $('taken').value = s.taken
+    $('points').value = s.points
     if (s.specs.length) {
       $('loaded').textContent = `${s.specs.length} tree specs · shown on tree ${s.tree_version}`
       showSpecs(s.specs, s.spec)

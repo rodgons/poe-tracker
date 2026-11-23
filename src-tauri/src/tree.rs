@@ -109,6 +109,8 @@ pub struct PanelView {
     next: Vec<NextPoint>,
     refunds: Vec<String>,
     pub notices: Vec<String>,
+    /// the Build's following Tree spec, named when this one is complete
+    pub next_spec: Option<String>,
     /// min x, min y, max x, max y of what's drawn
     bounds: (i32, i32, i32, i32),
 }
@@ -340,6 +342,7 @@ impl Plan {
                 .collect(),
             refunds,
             notices,
+            next_spec: None,
             bounds,
         }
     }
