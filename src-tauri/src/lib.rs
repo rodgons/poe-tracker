@@ -18,6 +18,7 @@ mod clientlog;
 mod foreground;
 mod gamewin;
 mod gems;
+mod guide;
 mod keys;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -132,6 +133,10 @@ pub enum Msg {
     GemHotkey,
     /// the tray's Show/Hide gem panel item
     ToggleGemPanel,
+    /// the Guide panel hotkey
+    GuideHotkey,
+    /// the tray's Show/Hide guide panel item
+    ToggleGuidePanel,
     /// the frontmost app, and its window frame when it's the game
     Frontmost(String, Option<gamewin::Frame>),
     /// the player saved new key binds
@@ -337,33 +342,42 @@ fn logical_size(win: &WebviewWindow) -> (f64, f64) {
 
 /// The Gem panel's window; the Corner panel's is "corner".
 const GEM_PANEL: &str = "gempanel";
+/// The Guide panel's window.
+const GUIDE_PANEL: &str = "guidepanel";
 
-/// The panel window a page names: "gems" is the Gem panel, anything else the Corner panel.
+/// The panel window a page names: "gems" is the Gem panel, "guide" the Guide panel,
+/// anything else the Corner panel.
 fn panel_label(which: Option<&str>) -> &'static str {
-    if which == Some("gems") {
-        GEM_PANEL
-    } else {
-        "corner"
+    match which {
+        Some("gems") => GEM_PANEL,
+        Some("guide") => GUIDE_PANEL,
+        _ => "corner",
     }
 }
 
-/// Puts a panel inside the game window at the player's spot (the Corner panel top-right,
-/// the Gem panel beside the gem level-up icons by default), or in the screen corner when
-/// the game window can't be found.
+/// Puts a panel inside the game window at the player's spot (by default the Corner panel
+/// top-right, the Gem panel beside the gem level-up icons, the Guide panel above the skill
+/// bar), or in the screen corner when the game window can't be found.
 fn position_panel(app: &AppHandle, win: &WebviewWindow) {
-    let gems = win.label() == GEM_PANEL;
+    let label = win.label();
     let (frame, spot, dragging) = {
         let st = app.state::<AppState>();
         let st = st.lock().unwrap();
-        (st.frame, if gems { st.saved.gem_spot } else { st.saved.panel_spot }, st.drag_from.is_some())
+        let spot = match label {
+            GEM_PANEL => st.saved.gem_spot,
+            GUIDE_PANEL => st.saved.guide_spot,
+            _ => st.saved.panel_spot,
+        };
+        (st.frame, spot, st.drag_from.is_some())
     };
     if dragging {
         return;
     }
     let Some(frame) = frame else { return place_in_corner(win) };
     let (frame, size) = (logical_frame(win, frame), logical_size(win));
-    let (x, y) = match spot {
-        None if gems => placement::beside_gem_icons(frame, size),
+    let (x, y) = match (spot, label) {
+        (None, GEM_PANEL) => placement::beside_gem_icons(frame, size),
+        (None, GUIDE_PANEL) => placement::above_skill_bar(frame, size),
         _ => placement::place(frame, size, spot),
     };
     let _ = win.set_position(LogicalPosition::new(x, y));
@@ -399,6 +413,7 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
     // never shown outside the game, so not at launch either: the tray icon says it's running
     let mut visible = false;
     let mut gems_visible = false;
+    let mut guide_visible = false;
     let mut frontmost = foreground::frontmost_app();
     let mut key = "none yet";
     for msg in rx {
@@ -410,10 +425,11 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                 key = "panel hotkey";
                 visible = !visible;
             }
-            Msg::Esc if visible || gems_visible => {
+            Msg::Esc if visible || gems_visible || guide_visible => {
                 key = "Esc";
                 visible = false;
                 gems_visible = false;
+                guide_visible = false;
             }
             Msg::TogglePanel if in_poe || visible => visible = !visible,
             Msg::GemHotkey | Msg::ToggleGemPanel if in_poe || gems_visible => {
@@ -423,6 +439,10 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                 if gems_visible {
                     import_gems(&app, false);
                 }
+            }
+            Msg::GuideHotkey | Msg::ToggleGuidePanel if in_poe || guide_visible => {
+                key = "guide panel hotkey";
+                guide_visible = !guide_visible;
             }
             Msg::Zoom(step) if visible => {
                 let _ = app.emit_to("corner", "zoom", step);
@@ -440,13 +460,14 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                     st.frame = frame;
                     moved
                 };
-                if name == frontmost && !(moved && (visible || gems_visible)) {
+                if name == frontmost && !(moved && (visible || gems_visible || guide_visible)) {
                     continue;
                 }
                 // leaving the game hides the panels; coming back doesn't reopen them
                 if in_poe && !foreground::is_poe(&name) {
                     visible = false;
                     gems_visible = false;
+                    guide_visible = false;
                 }
                 frontmost = name;
             }
@@ -466,8 +487,9 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
         };
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
-            if let Some(win) = handle.get_webview_window(GEM_PANEL) {
-                if gems_visible {
+            for (label, shown) in [(GEM_PANEL, gems_visible), (GUIDE_PANEL, guide_visible)] {
+                let Some(win) = handle.get_webview_window(label) else { continue };
+                if shown {
                     position_panel(&handle, &win);
                     show(&win)
                 } else {
@@ -600,10 +622,18 @@ fn on_log_line(handle: &AppHandle, line: &str) {
                 _ => false,
             }
         }
-        clientlog::Event::Entered => {
+        clientlog::Event::Entered { area, .. } => {
             // the log handler holds the state: import once it lets go
             let h = handle.clone();
             std::thread::spawn(move || import_gems(&h, false));
+            let progress = app.saved.guide_progress();
+            let steps = guide::steps(guide::route(), &progress.options);
+            let step = guide::advance(&steps, progress.step, &area);
+            if step != progress.step {
+                app.saved.guide_mut().step = step;
+                let _ = store::save(&app.path, &app.saved);
+                let _ = handle.emit("guide", ());
+            }
             let s = &app.saved;
             let spec = s.build.as_ref().and_then(|b| b.specs.get(s.spec));
             if let Some(spec) = spec.filter(|_| !app.refunding.is_empty() && !app.refund_unchecked && !s.account.is_empty()) {
@@ -961,7 +991,7 @@ fn drag_panel(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let gems = which.as_deref() == Some("gems");
+    let label = panel_label(which.as_deref());
     let Some(win) = app.get_webview_window(panel_label(which.as_deref())) else { return Ok(()) };
     // window queries first, so the app state is never locked while waiting on the window
     let scale = win.scale_factor().map_err(|e| e.to_string())?;
@@ -985,16 +1015,72 @@ fn drag_panel(
         st.drag_from = None;
         if let Some(frame) = frame {
             let spot = Some(placement::spot_of(frame, size, at));
-            if gems {
-                st.saved.gem_spot = spot;
-            } else {
-                st.saved.panel_spot = spot;
+            match label {
+                GEM_PANEL => st.saved.gem_spot = spot,
+                GUIDE_PANEL => st.saved.guide_spot = spot,
+                _ => st.saved.panel_spot = spot,
             }
             store::save(&st.path, &st.saved)?;
         }
     }
     drop(st);
     let _ = win.set_position(LogicalPosition::new(at.0, at.1));
+    Ok(())
+}
+
+/// The Leveling guide for the Character: every Guide step for its switches, and where it is.
+#[derive(Serialize)]
+struct GuideView {
+    steps: Vec<guide::Step>,
+    /// the current step; `steps.len()` when the campaign is done
+    step: usize,
+    options: guide::Options,
+    character: String,
+    /// the exile-leveling commit the route came from
+    source: String,
+}
+
+#[tauri::command]
+fn guide_view(state: State<'_, AppState>) -> GuideView {
+    let st = state.lock().unwrap();
+    let progress = st.saved.guide_progress();
+    let steps = guide::steps(guide::route(), &progress.options);
+    GuideView {
+        step: progress.step.min(steps.len()),
+        steps,
+        options: progress.options,
+        character: st.saved.character.clone(),
+        source: guide::route().source.clone(),
+    }
+}
+
+/// The player moving the guide by hand: the Guide panel's ‹ › or a click in the Guide section.
+#[tauri::command]
+fn guide_jump(step: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut st = state.lock().unwrap();
+    let count = guide::steps(guide::route(), &st.saved.guide_progress().options).len();
+    st.saved.guide_mut().step = step.min(count);
+    store::save(&st.path, &st.saved)?;
+    drop(st);
+    let _ = app.emit("guide", ());
+    Ok(())
+}
+
+/// New route switches. The guide keeps its place by the area the current step heads to,
+/// since the switches add or remove steps before it.
+#[tauri::command]
+fn guide_options(options: guide::Options, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut st = state.lock().unwrap();
+    let old = st.saved.guide_progress();
+    let route = guide::route();
+    let (before, after) = (guide::steps(route, &old.options), guide::steps(route, &options));
+    let step = guide::same_place(&before, old.step, &after);
+    let progress = st.saved.guide_mut();
+    progress.options = options;
+    progress.step = step;
+    store::save(&st.path, &st.saved)?;
+    drop(st);
+    let _ = app.emit("guide", ());
     Ok(())
 }
 
@@ -1059,7 +1145,7 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
     Ok(())
 }
 
-/// Shows the Main window, at `section` ("tree", "gems", "build" or "settings") when given;
+/// Shows the Main window, at `section` ("tree", "gems", "guide", "build" or "settings") when given;
 /// otherwise the page picks (Build until a build is saved, then the last section used).
 fn open_main(app: &AppHandle, section: Option<&str>) {
     let Some(win) = app.get_webview_window("main") else { return };
@@ -1094,7 +1180,7 @@ async fn update(app: AppHandle, menu: Menu<tauri::Wry>) {
     if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
         return eprintln!("update to {} failed: {e}", update.version);
     }
-    let panel_shown = ["corner", GEM_PANEL]
+    let panel_shown = ["corner", GEM_PANEL, GUIDE_PANEL]
         .iter()
         .any(|l| app.get_webview_window(l).and_then(|w| w.is_visible().ok()).unwrap_or(false));
     if !panel_shown {
@@ -1179,6 +1265,9 @@ pub fn run() {
             gems_view,
             refresh_gems,
             set_skill_set,
+            guide_view,
+            guide_jump,
+            guide_options,
             app_info,
             restart_to_update,
             open_input_monitoring
@@ -1208,16 +1297,17 @@ pub fn run() {
             }
             #[cfg(target_os = "windows")]
             no_activate(&win);
-            // the Gem panel follows the same rules: mouse only, never the keyboard
-            if let Some(gem_win) = app.get_webview_window(GEM_PANEL) {
-                place_in_corner(&gem_win);
+            // the Gem and Guide panels follow the same rules: mouse only, never the keyboard
+            for label in [GEM_PANEL, GUIDE_PANEL] {
+                let Some(panel) = app.get_webview_window(label) else { continue };
+                place_in_corner(&panel);
                 #[cfg(target_os = "macos")]
                 {
-                    macos::make_nonactivating(&gem_win);
-                    macos::float_over_fullscreen(&gem_win);
+                    macos::make_nonactivating(&panel);
+                    macos::float_over_fullscreen(&panel);
                 }
                 #[cfg(target_os = "windows")]
-                no_activate(&gem_win);
+                no_activate(&panel);
             }
 
             // closing the Main window only hides it, so the tray can reopen it
@@ -1238,13 +1328,15 @@ pub fn run() {
             app.manage(KeyTx(Mutex::new(tx.clone())));
             let panel_item = MenuItem::with_id(app, "panel", "Show/Hide panel", true, None::<&str>)?;
             let gem_item = MenuItem::with_id(app, "gempanel", "Show/Hide gem panel", true, None::<&str>)?;
+            let guide_panel_item = MenuItem::with_id(app, "guidepanel", "Show/Hide guide panel", true, None::<&str>)?;
+            let guide_item = MenuItem::with_id(app, "guide", "Open guide…", true, None::<&str>)?;
             let gems_item = MenuItem::with_id(app, "gems", "Open gems…", true, None::<&str>)?;
             let tree_item = MenuItem::with_id(app, "tree", "Open tree…", true, None::<&str>)?;
             let build_item = MenuItem::with_id(app, "build", "Set up build…", true, None::<&str>)?;
             let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let resync_item = MenuItem::with_id(app, "resync", "Re-sync character…", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit POE Tracker", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&panel_item, &gem_item, &tree_item, &gems_item, &build_item, &settings_item, &resync_item, &quit])?;
+            let menu = Menu::with_items(app, &[&panel_item, &gem_item, &guide_panel_item, &tree_item, &gems_item, &guide_item, &build_item, &settings_item, &resync_item, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("POE Tracker")
@@ -1256,6 +1348,10 @@ pub fn run() {
                     "gempanel" => {
                         let _ = tray_tx.send(Msg::ToggleGemPanel);
                     }
+                    "guidepanel" => {
+                        let _ = tray_tx.send(Msg::ToggleGuidePanel);
+                    }
+                    "guide" => open_main(app, Some("guide")),
                     "gems" => open_main(app, Some("gems")),
                     "tree" => open_main(app, Some("tree")),
                     "build" => open_main(app, Some("build")),

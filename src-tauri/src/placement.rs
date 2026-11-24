@@ -25,6 +25,15 @@ pub fn beside_gem_icons(frame: Frame, panel: (f64, f64)) -> (f64, f64) {
     (frame.x + (free.0 - GEM_ICONS).max(0.0), frame.y + (frame.h * 0.58 - panel.1 / 2.0).clamp(0.0, free.1))
 }
 
+/// Room left at the game window's bottom for the skill bar and the life and mana globes.
+const SKILL_BAR: f64 = 0.12;
+
+/// The Guide panel's default spot: centred just above the skill bar.
+pub fn above_skill_bar(frame: Frame, panel: (f64, f64)) -> (f64, f64) {
+    let free = ((frame.w - panel.0).max(0.0), (frame.h - panel.1).max(0.0));
+    (frame.x + free.0 / 2.0, frame.y + (free.1 - frame.h * SKILL_BAR).max(0.0))
+}
+
 /// The spot for a panel the player dropped at (x, y), kept inside the game window.
 pub fn spot_of(frame: Frame, panel: (f64, f64), at: (f64, f64)) -> (f64, f64) {
     let free = ((frame.w - panel.0).max(1.0), (frame.h - panel.1).max(1.0));
@@ -55,6 +64,13 @@ mod tests {
         let (x, y) = beside_gem_icons(GAME, (276.0, 300.0));
         assert_eq!(x, 100.0 + 1600.0 - 276.0 - 84.0);
         assert!(y > 50.0 + 900.0 * 0.4 && y + 300.0 <= 950.0);
+    }
+
+    #[test]
+    fn the_guide_panel_sits_above_the_skill_bar() {
+        let (x, y) = above_skill_bar(GAME, (540.0, 200.0));
+        assert_eq!(x, 100.0 + (1600.0 - 540.0) / 2.0);
+        assert_eq!(y, 50.0 + 900.0 - 200.0 - 108.0);
     }
 
     #[test]

@@ -1,8 +1,19 @@
 // What the app remembers between runs: one JSON file in the OS app config folder.
+use crate::guide;
 use crate::keys::Binds;
 use crate::pob::Build;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
+
+/// One Character's place in the Leveling guide, and its route switches.
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GuideProgress {
+    /// the current Guide step; the step count when the campaign is done
+    pub step: usize,
+    pub options: guide::Options,
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -27,6 +38,10 @@ pub struct Saved {
     pub binds: Binds,
     /// the Skill set the player picked in the Gems section; None follows the Tree spec
     pub skill_set: Option<usize>,
+    /// where the player dragged the Guide panel; None is bottom-centre, above the skill bar
+    pub guide_spot: Option<(f64, f64)>,
+    /// each Character's Leveling guide progress, by lowercased name ("" before one is named)
+    pub guide: HashMap<String, GuideProgress>,
 }
 
 impl Default for Saved {
@@ -44,7 +59,21 @@ impl Default for Saved {
             gem_spot: None,
             binds: Binds::default(),
             skill_set: None,
+            guide_spot: None,
+            guide: HashMap::new(),
         }
+    }
+}
+
+impl Saved {
+    /// The Character's Leveling guide progress, made when it has none yet.
+    pub fn guide_mut(&mut self) -> &mut GuideProgress {
+        let key = self.character.to_lowercase();
+        self.guide.entry(key).or_default()
+    }
+
+    pub fn guide_progress(&self) -> GuideProgress {
+        self.guide.get(&self.character.to_lowercase()).cloned().unwrap_or_default()
     }
 }
 

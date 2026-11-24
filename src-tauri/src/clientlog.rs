@@ -11,8 +11,9 @@ pub enum Event {
     Unallocated { id: String, name: String },
     /// a level-up line: tells which character is playing
     LevelUp { character: String, level: u32 },
-    /// the player changed area
-    Entered,
+    /// the player changed area: its internal id ("1_1_2", "HideoutFelled") and level.
+    /// Logged on every area load, in English on every client.
+    Entered { area: String, level: u32 },
 }
 
 /// Turns one log line into an event, if it's one the app uses.
@@ -30,11 +31,14 @@ pub fn parse(line: &str) -> Option<Event> {
             return Some(if allocated { Event::Allocated { id, name } } else { Event::Unallocated { id, name } });
         }
     }
-    // ": You have entered The Coast."
-    let rest = msg.strip_prefix(": ")?;
-    if rest.starts_with("You have entered ") {
-        return Some(Event::Entered);
+    // "Generating level 2 area \"1_1_2\" with seed 2103837163" (the localised
+    // "You have entered" can't tell The Coast in Act 1 from the one in Act 6)
+    if let Some(rest) = msg.strip_prefix("Generating level ") {
+        let (level, rest) = rest.split_once(" area \"")?;
+        let (area, _) = rest.split_once('"')?;
+        return Some(Event::Entered { area: area.to_string(), level: level.parse().ok()? });
     }
+    let rest = msg.strip_prefix(": ")?;
     // ": YourChar (Inquisitor) is now level 80"
     let (who, level) = rest.rsplit_once(" is now level ")?;
     let level = level.parse().ok()?;
@@ -145,7 +149,17 @@ mod tests {
 
     #[test]
     fn reads_area_changes() {
-        assert_eq!(parse(&format!("{HEAD}: You have entered Celestial Nebula Hideout.")), Some(Event::Entered));
+        let debug = "2026/11/10 12:06:02 10811171 1186a8e1 [DEBUG Client 23728] ";
+        assert_eq!(
+            parse(&format!("{debug}Generating level 2 area \"1_1_2\" with seed 2103837163")),
+            Some(Event::Entered { area: "1_1_2".into(), level: 2 })
+        );
+        assert_eq!(
+            parse(&format!("{debug}Generating level 60 area \"HideoutBattleground\" with seed 1\r")),
+            Some(Event::Entered { area: "HideoutBattleground".into(), level: 60 })
+        );
+        // the localised chat line no longer counts
+        assert_eq!(parse(&format!("{HEAD}: You have entered The Coast.")), None);
     }
 
     #[test]

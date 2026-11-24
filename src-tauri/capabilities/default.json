@@ -4,6 +4,7 @@
   "windows": [
     "corner",
     "gempanel",
+    "guidepanel",
     "main"
   ],
   "permissions": [
