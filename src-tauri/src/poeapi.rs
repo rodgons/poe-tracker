@@ -94,6 +94,114 @@ pub fn passives(account: &str, character: &str) -> Result<Passives, String> {
     parse_passives(&get(&url)?)
 }
 
+/// A gem socketed in the Character's equipped gear (weapon swap left out).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OwnedGem {
+    /// the in-game name, " Support" kept
+    pub name: String,
+    /// a Vaal gem's base skill ("Molten Shell" for Vaal Molten Shell)
+    pub vaal_base: Option<String>,
+    pub support: bool,
+    pub level: u32,
+    pub quality: u32,
+    /// the item's slot ("Helm", "Weapon"…)
+    pub slot: String,
+    /// gems with the same number are linked: the item's position and its socket's group
+    pub link: u32,
+}
+
+pub fn items(account: &str, character: &str) -> Result<Vec<OwnedGem>, String> {
+    let url = format!(
+        "{SITE}/get-items?accountName={}&character={}&realm=pc",
+        account_param(account),
+        account_param(character)
+    );
+    parse_items(&get(&url)?)
+}
+
+/// Slots the gem comparison ignores: weapon swap, flasks and anything not worn.
+const SKIPPED_SLOTS: [&str; 4] = ["Weapon2", "Offhand2", "Flask", "MainInventory"];
+
+fn parse_items(body: &str) -> Result<Vec<OwnedGem>, String> {
+    #[derive(Deserialize)]
+    struct Items {
+        items: Vec<Item>,
+    }
+    #[derive(Deserialize)]
+    struct Item {
+        #[serde(rename = "inventoryId", default)]
+        slot: String,
+        #[serde(default)]
+        sockets: Vec<Socket>,
+        #[serde(rename = "socketedItems", default)]
+        socketed: Vec<Socketed>,
+    }
+    #[derive(Deserialize)]
+    struct Socket {
+        #[serde(default)]
+        group: u32,
+    }
+    #[derive(Deserialize)]
+    struct Socketed {
+        #[serde(default)]
+        socket: usize,
+        #[serde(rename = "typeLine", default)]
+        type_line: String,
+        #[serde(rename = "baseType", default)]
+        base_type: String,
+        #[serde(default)]
+        support: Option<bool>,
+        #[serde(rename = "abyssJewel", default)]
+        abyss: bool,
+        #[serde(default)]
+        properties: Vec<Property>,
+        #[serde(default)]
+        hybrid: Option<Hybrid>,
+    }
+    #[derive(Deserialize)]
+    struct Property {
+        name: String,
+        #[serde(default)]
+        values: Vec<(String, serde_json::Value)>,
+    }
+    #[derive(Deserialize)]
+    struct Hybrid {
+        #[serde(rename = "isVaalGem", default)]
+        vaal: bool,
+        #[serde(rename = "baseTypeName", default)]
+        base: String,
+    }
+    let parsed: Items = serde_json::from_str(body).map_err(|_| NOT_FOUND.to_string())?;
+    // "21 (Max)" → 21, "+23%" → 23; a missing Quality is 0
+    let number = |p: &[Property], name: &str| -> u32 {
+        p.iter()
+            .find(|p| p.name == name)
+            .and_then(|p| p.values.first())
+            .and_then(|(v, _)| v.trim().trim_start_matches('+').chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok())
+            .unwrap_or(0)
+    };
+    let mut gems = Vec::new();
+    for (i, item) in parsed.items.iter().enumerate() {
+        if SKIPPED_SLOTS.contains(&item.slot.as_str()) {
+            continue;
+        }
+        for g in item.socketed.iter().filter(|g| !g.abyss && g.support.is_some()) {
+            let name = if g.base_type.is_empty() { &g.type_line } else { &g.base_type };
+            let group = item.sockets.get(g.socket).map_or(g.socket as u32 + 100, |s| s.group);
+            gems.push(OwnedGem {
+                name: name.clone(),
+                vaal_base: g.hybrid.as_ref().filter(|h| h.vaal && !h.base.is_empty()).map(|h| h.base.clone()),
+                support: g.support == Some(true),
+                level: number(&g.properties, "Level"),
+                quality: number(&g.properties, "Quality"),
+                slot: item.slot.clone(),
+                link: (i as u32) * 1000 + group,
+            });
+        }
+    }
+    Ok(gems)
+}
+
 fn get(url: &str) -> Result<String, String> {
     match ureq::get(url).set("User-Agent", USER_AGENT).timeout(TIMEOUT).call() {
         Ok(resp) => resp.into_string().map_err(|e| format!("Couldn't read pathofexile.com's answer: {e}")),
@@ -147,6 +255,28 @@ mod tests {
         let body = r#"[{"id":"Standard","category":{"id":"Standard"}},{"id":"Covens","category":{"id":"Coven","current":true}},
             {"id":"Hardcore Covens","category":{"id":"Coven","current":true}},{"id":"Old","endAt":"2025-01-01"}]"#;
         assert_eq!(current_leagues(body).unwrap(), vec!["Covens", "Hardcore Covens"]);
+    }
+
+    #[test]
+    fn reads_socketed_gems() {
+        let body = r#"{"items":[
+            {"inventoryId":"Boots","sockets":[{"group":0},{"group":0},{"group":1}],"socketedItems":[
+              {"socket":0,"support":true,"typeLine":"More Duration Support","baseType":"More Duration Support",
+               "properties":[{"name":"Duration, Support","values":[]},{"name":"Level","values":[["20 (Max)",0]]},{"name":"Quality","values":[["+23%",1]]}]},
+              {"socket":1,"support":false,"typeLine":"Vaal Molten Shell","baseType":"Vaal Molten Shell",
+               "properties":[{"name":"Level","values":[["21 (Max)",0]]}],"hybrid":{"isVaalGem":true,"baseTypeName":"Molten Shell"}},
+              {"socket":2,"support":false,"typeLine":"Herald of Ash","properties":[{"name":"Level","values":[["7",0]]}]}]},
+            {"inventoryId":"Belt","sockets":[{"group":0}],"socketedItems":[{"socket":0,"abyssJewel":true,"typeLine":"Murderous Eye Jewel"}]},
+            {"inventoryId":"Weapon2","sockets":[{"group":0}],"socketedItems":[{"socket":0,"support":false,"typeLine":"Dash"}]}],
+            "character":{"name":"x"}}"#;
+        let gems = parse_items(body).unwrap();
+        assert_eq!(gems.len(), 3, "abyss jewels and weapon swap are left out");
+        assert_eq!((gems[0].level, gems[0].quality, gems[0].support), (20, 23, true));
+        assert_eq!(gems[1].vaal_base.as_deref(), Some("Molten Shell"));
+        assert_eq!(gems[1].quality, 0);
+        assert_eq!(gems[0].link, gems[1].link);
+        assert_ne!(gems[1].link, gems[2].link);
+        assert_eq!(gems[2].name, "Herald of Ash");
     }
 
     #[test]

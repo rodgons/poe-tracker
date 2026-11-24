@@ -1,0 +1,141 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>POE Tracker · Gem panel</title>
+<style>
+  /* Gem panel: only what needs doing to make the socketed gems match the Skill set.
+     Every mark has an icon and a word, never colour alone: + missing, ⛓ unlinked, − remove. */
+  :root {
+    --scene: #0b0a08; --ink: #e0d6c3; --dim: #aa9e82; --faint: #4a4135;
+    --alloc: #d9b45a; --next: #8888ff; --plan: #8a8072; --other: #2a251e; --refund: #e04a3f; --unlinked: #e09a4f;
+    --panel: rgba(11, 10, 8, .94); --edge: #6e5a3a;
+    --display: "Cinzel", "Trajan Pro", Georgia, serif;
+    --body: -apple-system, "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, Menlo, Consolas, monospace;
+  }
+  html, body { margin: 0; background: transparent; color: var(--ink); font-family: var(--body); }
+  .panel {
+    margin: 8px; padding: 10px 12px; border-radius: 8px; background: var(--panel);
+    border: 1px solid var(--edge); display: flex; flex-direction: column; gap: 8px; font-size: 12px;
+  }
+  .hd { display: flex; flex-direction: column; gap: 2px; cursor: move; user-select: none; -webkit-user-select: none; }
+  .hd h1 { margin: 0; font: 600 12.5px/1.25 var(--display); letter-spacing: .05em; color: var(--alloc);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hd span { display: flex; justify-content: space-between; gap: 8px; font: 500 10.5px var(--mono); color: var(--dim); }
+  .hd span .old { color: var(--refund); }
+  .grp h2 { margin: 0 0 2px; font: 600 11px var(--body); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .grp h2 small { font-weight: 400; color: var(--plan); }
+  .row { display: grid; grid-template-columns: 74px 1fr; gap: 6px; align-items: baseline; padding: 1px 0; }
+  .row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .name small { color: var(--plan); }
+  .mark { font: 600 10.5px var(--body); white-space: nowrap; }
+  .mark i { font-style: normal; display: inline-block; width: 14px; text-align: center; }
+  .mark.missing { color: var(--next); }
+  .mark.unlinked { color: var(--unlinked); }
+  .mark.remove { color: var(--refund); }
+  .mark.had { color: var(--alloc); }
+  /* gems as of more than 10 minutes ago: the marks step back until the next import */
+  .panel.stale .grp, .panel.stale .ok { opacity: .5; }
+  .ok { color: var(--alloc); font-weight: 600; }
+  .note { color: var(--dim); line-height: 1.4; }
+  .note b { color: var(--alloc); font-weight: 600; }
+  .keys { display: none; font-size: 10.5px; color: var(--plan); }
+  .panel:hover .keys { display: block; }
+</style>
+</head>
+<body>
+<div class="panel" id="panel"><p class="note">Loading…</p></div>
+<script src="minitree.js"></script>
+<script src="keys.js"></script>
+<script>
+  const { invoke } = window.__TAURI__.core
+  const { listen } = window.__TAURI__.event
+  const esc = MiniTree.esc
+  const panel = document.getElementById('panel')
+  let hotkey = KeyLabel.format({ code: 'KeyG', alt: true })
+  let view = null
+
+  const marks = { missing: ['+', 'Missing'], unlinked: ['⛓', 'Unlinked'], remove: ['−', 'Remove'], had: ['✓', ''] }
+  const mark = st => `<span class="mark ${st}"><i aria-hidden="true">${marks[st][0]}</i>${marks[st][1]}</span>`
+  const ago = secs => {
+    const m = Math.floor((Date.now() / 1000 - secs) / 60)
+    return m < 1 ? 'just now' : m === 1 ? '1 min ago' : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ago`
+  }
+  const stale = v => v.as_of && Date.now() / 1000 - v.as_of > 600
+
+  function render() {
+    const v = view
+    const keys = `<span class="keys">${esc(hotkey)} or Esc hides · drag the title to move</span>`
+    if (!v) {
+      panel.innerHTML = `<p class="note"><b>No build yet.</b> Open <b>Set up build…</b> from the POE Tracker menu bar / tray icon.</p>${keys}`
+      return
+    }
+    const c = v.comparison
+    const left = c ? c.counts.missing + c.counts.unlinked + c.counts.remove : 0
+    const title = v.skill_set != null ? v.skill_sets[v.skill_set] : 'Gems'
+    const when = v.busy ? 'importing…' : v.as_of ? `<em class="${stale(v) ? 'old' : ''}" style="font-style:normal">as of ${ago(v.as_of)}</em>` : ''
+    const head = `<div class="hd" title="${esc(title)} · drag to move the panel"><h1>${esc(title)}</h1>
+      <span><b style="font-weight:500">${c ? (left ? `${left} to sort out` : 'all set') : ''}</b>${when}</span></div>`
+    const parts = []
+    if (v.notice) parts.push(`<p class="note">${esc(v.notice)}</p>`)
+    if (c && !left) parts.push(`<p class="ok">${mark('had')} All gems match</p>`)
+    if (c && left) {
+      for (const g of c.groups) {
+        const todo = g.gems.filter(r => r.status === 'missing' || r.status === 'unlinked')
+        if (g.heading || !todo.length) continue
+        parts.push(`<div class="grp"><h2>${esc(g.title)}${g.slot ? ` <small>· ${esc(g.slot)}</small>` : ''}</h2>${todo.map(r =>
+          `<div class="row">${mark(r.status)}<span class="name">${esc(r.name)}</span></div>`).join('')}</div>`)
+      }
+      if (c.remove.length) {
+        parts.push(`<div class="grp"><h2>Remove</h2>${c.remove.map(x =>
+          `<div class="row">${mark('remove')}<span class="name">${esc(x.name)} <small>· ${esc(x.slot)}</small></span></div>`).join('')}</div>`)
+      }
+    }
+    if (!c && !v.notice) parts.push(`<p class="note">${v.busy ? 'Importing your gems…' : 'Your gems haven\'t been imported yet.'}</p>`)
+    panel.classList.toggle('stale', !!stale(v))
+    panel.innerHTML = head + parts.join('') + keys
+  }
+
+  const load = () => invoke('gems_view').then(v => { view = v; render() }, () => render())
+  load()
+  listen('gems', load)
+  listen('plan', load)
+  const useBinds = b => { if (b.gem_toggle) hotkey = KeyLabel.format(b.gem_toggle); render() }
+  invoke('key_binds').then(useBinds)
+  listen('binds', e => useBinds(e.payload))
+  setInterval(() => { if (view?.as_of) render() }, 30000)
+
+  // the window follows the panel's height (plus its 8px margins)
+  let fitted = 0
+  new ResizeObserver(() => {
+    const h = Math.ceil(panel.getBoundingClientRect().height) + 16
+    if (h !== fitted) { fitted = h; invoke('fit_panel', { height: h, which: 'gems' }) }
+  }).observe(panel)
+
+  // dragging the title moves the panel within the game window; the app remembers the spot
+  let moving = null
+  const drag = (phase, dx, dy) => invoke('drag_panel', { phase, dx, dy, which: 'gems' })
+  panel.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || !e.target.closest('.hd')) return
+    moving = { x: e.screenX, y: e.screenY, dx: 0, dy: 0 }
+    panel.setPointerCapture(e.pointerId)
+    drag('start', 0, 0)
+  })
+  panel.addEventListener('pointermove', e => {
+    if (!moving) return
+    moving.dx = e.screenX - moving.x; moving.dy = e.screenY - moving.y
+    drag('move', moving.dx, moving.dy)
+  })
+  const endMove = e => {
+    if (!moving) return
+    if (e.type === 'pointerup') { moving.dx = e.screenX - moving.x; moving.dy = e.screenY - moving.y }
+    drag('end', moving.dx, moving.dy)
+    moving = null
+  }
+  panel.addEventListener('pointerup', endMove)
+  panel.addEventListener('pointercancel', endMove)
+  panel.addEventListener('lostpointercapture', endMove)
+</script>
+</body>
+</html>

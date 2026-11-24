@@ -21,8 +21,12 @@ pub struct Saved {
     pub log_path: Option<PathBuf>,
     /// where the player dragged the Corner panel inside the game window, (0,0)–(1,1); None is top-right
     pub panel_spot: Option<(f64, f64)>,
+    /// the same for the Gem panel; None sits beside the gem level-up icons
+    pub gem_spot: Option<(f64, f64)>,
     /// the keys the hook listens for
     pub binds: Binds,
+    /// the Skill set the player picked in the Gems section; None follows the Tree spec
+    pub skill_set: Option<usize>,
 }
 
 impl Default for Saved {
@@ -37,7 +41,9 @@ impl Default for Saved {
             points: 5,
             log_path: None,
             panel_spot: None,
+            gem_spot: None,
             binds: Binds::default(),
+            skill_set: None,
         }
     }
 }

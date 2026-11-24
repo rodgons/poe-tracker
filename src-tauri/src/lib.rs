@@ -17,6 +17,7 @@ use tauri::{
 mod clientlog;
 mod foreground;
 mod gamewin;
+mod gems;
 mod keys;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -48,7 +49,25 @@ struct App {
     refund_unchecked: bool,
     /// a downloaded update's version, waiting for a restart
     update_ready: Option<String>,
+    /// the Character's socketed gems from the last items import
+    gems: Gems,
 }
+
+/// The last items import from pathofexile.com, and when it can run again.
+#[derive(Default)]
+struct Gems {
+    owned: Option<Vec<poeapi::OwnedGem>>,
+    /// seconds since 1970 when `owned` was imported
+    at: Option<u64>,
+    /// why the last import failed
+    error: Option<String>,
+    busy: bool,
+    tried: Option<std::time::Instant>,
+}
+
+/// Imports at most this often, unless the player asked (Save, Re-sync): get-items allows
+/// 90 requests per 30 minutes per IP.
+const GEMS_EVERY: Duration = Duration::from_secs(60);
 
 impl App {
     /// Ticking pauses while the log shows a different character playing.
@@ -104,6 +123,10 @@ pub enum Msg {
     Pan(i8, i8),
     /// the tray's Show/Hide panel item
     TogglePanel,
+    /// the Gem panel hotkey
+    GemHotkey,
+    /// the tray's Show/Hide gem panel item
+    ToggleGemPanel,
     /// the frontmost app, and its window frame when it's the game
     Frontmost(String, Option<gamewin::Frame>),
     /// the player saved new key binds
@@ -130,6 +153,162 @@ fn permission() -> &'static str {
     return "not needed";
 }
 
+/// Imports the Character's gems in the background. `asked` (Save, Re-sync) skips the
+/// throttle; area changes and opening the Gems section don't.
+fn import_gems(handle: &AppHandle, asked: bool) {
+    let job = {
+        let st = handle.state::<AppState>();
+        let mut st = st.lock().unwrap();
+        let s = &st.saved;
+        let ready = s.build.is_some() && !s.account.is_empty() && !s.character.is_empty();
+        let recent = st.gems.tried.is_some_and(|t| t.elapsed() < GEMS_EVERY);
+        if !ready || st.gems.busy || (recent && !asked) {
+            None
+        } else {
+            let job = (s.account.clone(), s.character.clone());
+            st.gems.busy = true;
+            st.gems.tried = Some(std::time::Instant::now());
+            Some(job)
+        }
+    };
+    let Some((account, character)) = job else { return };
+    let _ = handle.emit("gems", ());
+    let app = handle.clone();
+    std::thread::spawn(move || {
+        let got = poeapi::items(&account, &character);
+        let st = app.state::<AppState>();
+        let mut st = st.lock().unwrap();
+        st.gems.busy = false;
+        // the Character changed while importing: this answer is someone else's
+        if st.saved.character != character || st.saved.account != account {
+            return;
+        }
+        match got {
+            Ok(owned) => {
+                st.gems.owned = Some(owned);
+                st.gems.at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs());
+                st.gems.error = None;
+            }
+            Err(e) => st.gems.error = Some(e),
+        }
+        drop(st);
+        let _ = app.emit("gems", ());
+    });
+}
+
+/// What the Gems section (and later the Gem panel) shows.
+#[derive(Serialize)]
+struct GemsView {
+    skill_sets: Vec<String>,
+    skill_set: Option<usize>,
+    chosen: Option<gems::Chosen>,
+    spec: String,
+    character: String,
+    /// None until an import has worked
+    comparison: Option<gems::Comparison>,
+    /// the Skill set alone, when there's nothing to compare against
+    groups: Vec<gems::GroupRow>,
+    as_of: Option<u64>,
+    busy: bool,
+    /// why gems can't be compared (no account, private profile…)
+    notice: Option<String>,
+}
+
+fn gems_view_of(app: &App) -> Option<GemsView> {
+    let s = &app.saved;
+    let build = s.build.as_ref()?;
+    let spec = build.specs.get(s.spec)?;
+    let chosen = gems::choose(build, s.spec, s.skill_set);
+    let set = chosen.and_then(|(i, _)| build.skill_sets.get(i));
+    let comparison = match (set, &app.gems.owned) {
+        (Some(set), Some(owned)) => Some(gems::compare(set, owned)),
+        _ => None,
+    };
+    let groups = match (set, &comparison) {
+        (Some(set), None) => gems::compare(set, &[]).groups,
+        _ => Vec::new(),
+    };
+    let notice = if build.skill_sets.is_empty() {
+        Some("This build has no gems. Paste it again in Build if it was saved before v0.6.".into())
+    } else if s.account.is_empty() {
+        Some("Add your pathofexile.com account in Build to compare your gems.".into())
+    } else {
+        app.gems.error.as_ref().map(|e| {
+            if e.contains("private") {
+                "Make your Characters tab public on pathofexile.com (My Account → Privacy) to compare your gems.".to_string()
+            } else {
+                format!("Couldn't import your gems: {e}")
+            }
+        })
+    };
+    Some(GemsView {
+        skill_sets: build.skill_sets.iter().map(|t| pob::clean_title(&t.title)).collect(),
+        skill_set: chosen.map(|(i, _)| i),
+        chosen: chosen.map(|(_, c)| c),
+        spec: spec.title.clone(),
+        character: s.character.clone(),
+        comparison,
+        groups,
+        as_of: app.gems.at,
+        busy: app.gems.busy,
+        notice,
+    })
+}
+
+#[tauri::command]
+fn gems_view(state: State<'_, AppState>) -> Option<GemsView> {
+    gems_view_of(&state.lock().unwrap())
+}
+
+/// The Gems section opened: import again if the last import is over a minute old.
+#[tauri::command]
+fn refresh_gems(app: AppHandle) {
+    import_gems(&app, false);
+}
+
+/// The player's Skill set pick; None follows the Tree spec again.
+#[tauri::command]
+fn set_skill_set(skill_set: Option<usize>, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut st = state.lock().unwrap();
+    st.saved.skill_set = skill_set;
+    store::save(&st.path, &st.saved)?;
+    drop(st);
+    let _ = app.emit("gems", ());
+    Ok(())
+}
+
+/// Builds saved before v0.6 kept only their trees: read the pasted build again for its
+/// Skill sets (and the raw spec titles that pair with them).
+fn upgrade_build(handle: AppHandle) {
+    let input = {
+        let st = handle.state::<AppState>();
+        let st = st.lock().unwrap();
+        match &st.saved.build {
+            Some(b) if b.skill_sets.is_empty() && !st.saved.input.is_empty() => st.saved.input.clone(),
+            _ => return,
+        }
+    };
+    std::thread::spawn(move || {
+        let Ok(fresh) = pob::code_from_input(&input).and_then(|c| pob::decode(&c)) else { return };
+        let st = handle.state::<AppState>();
+        let mut st = st.lock().unwrap();
+        if st.saved.input != input {
+            return;
+        }
+        let Some(build) = st.saved.build.as_mut() else { return };
+        if build.specs.len() == fresh.specs.len() {
+            for (old, new) in build.specs.iter_mut().zip(&fresh.specs) {
+                old.raw_title = new.raw_title.clone();
+            }
+        }
+        build.skill_sets = fresh.skill_sets;
+        build.active_skill_set = fresh.active_skill_set;
+        let _ = store::save(&st.path, &st.saved);
+        drop(st);
+        let _ = handle.emit("gems", ());
+    });
+}
+
 fn place_in_corner(win: &WebviewWindow) {
     let Ok(Some(monitor)) = win.current_monitor() else { return };
     let Ok(size) = win.outer_size() else { return };
@@ -151,19 +330,37 @@ fn logical_size(win: &WebviewWindow) -> (f64, f64) {
     win.outer_size().map_or((436.0, 520.0), |s| (s.width as f64 / scale, s.height as f64 / scale))
 }
 
-/// Puts the Corner panel inside the game window at the player's spot (top-right by
-/// default), or in the screen corner when the game window can't be found.
+/// The Gem panel's window; the Corner panel's is "corner".
+const GEM_PANEL: &str = "gempanel";
+
+/// The panel window a page names: "gems" is the Gem panel, anything else the Corner panel.
+fn panel_label(which: Option<&str>) -> &'static str {
+    if which == Some("gems") {
+        GEM_PANEL
+    } else {
+        "corner"
+    }
+}
+
+/// Puts a panel inside the game window at the player's spot (the Corner panel top-right,
+/// the Gem panel beside the gem level-up icons by default), or in the screen corner when
+/// the game window can't be found.
 fn position_panel(app: &AppHandle, win: &WebviewWindow) {
+    let gems = win.label() == GEM_PANEL;
     let (frame, spot, dragging) = {
         let st = app.state::<AppState>();
         let st = st.lock().unwrap();
-        (st.frame, st.saved.panel_spot, st.drag_from.is_some())
+        (st.frame, if gems { st.saved.gem_spot } else { st.saved.panel_spot }, st.drag_from.is_some())
     };
     if dragging {
         return;
     }
     let Some(frame) = frame else { return place_in_corner(win) };
-    let (x, y) = placement::place(logical_frame(win, frame), logical_size(win), spot);
+    let (frame, size) = (logical_frame(win, frame), logical_size(win));
+    let (x, y) = match spot {
+        None if gems => placement::beside_gem_icons(frame, size),
+        _ => placement::place(frame, size, spot),
+    };
     let _ = win.set_position(LogicalPosition::new(x, y));
 }
 
@@ -196,6 +393,7 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
     let mut presses = 0;
     // never shown outside the game, so not at launch either: the tray icon says it's running
     let mut visible = false;
+    let mut gems_visible = false;
     let mut frontmost = foreground::frontmost_app();
     let mut key = "none yet";
     for msg in rx {
@@ -207,11 +405,20 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                 key = "panel hotkey";
                 visible = !visible;
             }
-            Msg::Esc if visible => {
+            Msg::Esc if visible || gems_visible => {
                 key = "Esc";
                 visible = false;
+                gems_visible = false;
             }
             Msg::TogglePanel if in_poe || visible => visible = !visible,
+            Msg::GemHotkey | Msg::ToggleGemPanel if in_poe || gems_visible => {
+                key = "gem panel hotkey";
+                gems_visible = !gems_visible;
+                // opening it brings the gems up to date, at most once a minute
+                if gems_visible {
+                    import_gems(&app, false);
+                }
+            }
             Msg::Zoom(step) if visible => {
                 let _ = app.emit_to("corner", "zoom", step);
                 continue;
@@ -228,12 +435,13 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                     st.frame = frame;
                     moved
                 };
-                if name == frontmost && !(moved && visible) {
+                if name == frontmost && !(moved && (visible || gems_visible)) {
                     continue;
                 }
-                // leaving the game hides the panel; coming back doesn't reopen it
+                // leaving the game hides the panels; coming back doesn't reopen them
                 if in_poe && !foreground::is_poe(&name) {
                     visible = false;
+                    gems_visible = false;
                 }
                 frontmost = name;
             }
@@ -253,6 +461,14 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
         };
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
+            if let Some(win) = handle.get_webview_window(GEM_PANEL) {
+                if gems_visible {
+                    position_panel(&handle, &win);
+                    show(&win)
+                } else {
+                    hide(&win)
+                }
+            }
             let Some(win) = handle.get_webview_window("corner") else { return };
             if status.visible {
                 position_panel(&handle, &win);
@@ -374,6 +590,9 @@ fn on_log_line(handle: &AppHandle, line: &str) {
             }
         }
         clientlog::Event::Entered => {
+            // the log handler holds the state: import once it lets go
+            let h = handle.clone();
+            std::thread::spawn(move || import_gems(&h, false));
             let s = &app.saved;
             let spec = s.build.as_ref().and_then(|b| b.specs.get(s.spec));
             if let Some(spec) = spec.filter(|_| !app.refunding.is_empty() && !app.refund_unchecked && !s.account.is_empty()) {
@@ -578,9 +797,18 @@ async fn save_setup(
     };
     let mut guard = state.lock().unwrap();
     let st = &mut *guard;
+    let new_build = st.pending.is_some();
     if let Some((input, build)) = st.pending.take() {
         st.saved.input = input;
         st.saved.build = Some(build);
+    }
+    // a new Build or Tree spec follows its paired Skill set again
+    if new_build || spec != st.saved.spec {
+        st.saved.skill_set = None;
+    }
+    // another Character's gems aren't this one's
+    if character != st.saved.character || account != st.saved.account {
+        st.gems = Gems::default();
     }
     st.saved.spec = spec;
     st.saved.account = account;
@@ -593,6 +821,9 @@ async fn save_setup(
     st.synced = None;
     store::save(&st.path, &st.saved)?;
     let _ = app.emit("plan", panel_view_of(st));
+    drop(guard);
+    let _ = app.emit("gems", ());
+    import_gems(&app, true);
     Ok(())
 }
 
@@ -655,7 +886,20 @@ fn resync(app: &AppHandle) {
             _ => None,
         }
     };
-    let Some((account, character, spec)) = job else { return open_main(app, Some("build")) };
+    if job.is_some() {
+        import_gems(app, true);
+    }
+    let Some((account, character, spec)) = job else {
+        let has_build = app.state::<AppState>().lock().unwrap().saved.build.is_some();
+        if has_build {
+            let _ = app.emit_to(
+                "main",
+                "resync_error",
+                "Re-sync needs your pathofexile.com account: type it below, find your Character and Save.",
+            );
+        }
+        return open_main(app, Some("build"));
+    };
     let app = app.clone();
     std::thread::spawn(move || match import_allocated(&account, &character, &spec) {
         Ok(allocated) => {
@@ -668,6 +912,7 @@ fn resync(app: &AppHandle) {
             st.synced = Some(format!("Re-synced {character} from pathofexile.com"));
             let _ = store::save(&st.path, &st.saved);
             let _ = app.emit("plan", panel_view_of(&st));
+            let _ = app.emit_to("main", "resynced", format!("Re-synced {character}"));
         }
         Err(e) => {
             let _ = app.emit_to("main", "resync_error", format!("Re-sync failed: {e}"));
@@ -680,8 +925,8 @@ fn resync(app: &AppHandle) {
 /// Shrinks the corner window to the panel, so the empty space under it doesn't
 /// catch clicks meant for the game.
 #[tauri::command]
-fn fit_panel(height: f64, app: AppHandle) {
-    let Some(win) = app.get_webview_window("corner") else { return };
+fn fit_panel(height: f64, which: Option<String>, app: AppHandle) {
+    let Some(win) = app.get_webview_window(panel_label(which.as_deref())) else { return };
     let Ok(scale) = win.scale_factor() else { return };
     let Ok(size) = win.outer_size() else { return };
     let width = size.width as f64 / scale;
@@ -693,8 +938,16 @@ fn fit_panel(height: f64, app: AppHandle) {
 /// The player dragging the Corner panel by its title: `dx`, `dy` are logical pixels
 /// since the drag started. Dropping it remembers the spot within the game window.
 #[tauri::command]
-fn drag_panel(phase: String, dx: f64, dy: f64, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let Some(win) = app.get_webview_window("corner") else { return Ok(()) };
+fn drag_panel(
+    phase: String,
+    dx: f64,
+    dy: f64,
+    which: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let gems = which.as_deref() == Some("gems");
+    let Some(win) = app.get_webview_window(panel_label(which.as_deref())) else { return Ok(()) };
     // window queries first, so the app state is never locked while waiting on the window
     let scale = win.scale_factor().map_err(|e| e.to_string())?;
     let pos = win.outer_position().map_err(|e| e.to_string())?;
@@ -716,7 +969,12 @@ fn drag_panel(phase: String, dx: f64, dy: f64, app: AppHandle, state: State<'_, 
     if phase == "end" {
         st.drag_from = None;
         if let Some(frame) = frame {
-            st.saved.panel_spot = Some(placement::spot_of(frame, size, at));
+            let spot = Some(placement::spot_of(frame, size, at));
+            if gems {
+                st.saved.gem_spot = spot;
+            } else {
+                st.saved.panel_spot = spot;
+            }
             store::save(&st.path, &st.saved)?;
         }
     }
@@ -765,6 +1023,7 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
     let mut st = state.lock().unwrap();
     let title = st.saved.build.as_ref().and_then(|b| b.specs.get(spec)).ok_or("No such tree spec.")?.title.clone();
     st.saved.spec = spec;
+    st.saved.skill_set = None;
     // a hand Seed only counted the old spec's points; an import holds them all
     st.synced = st
         .saved
@@ -773,10 +1032,11 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
         .then(|| format!("Switched to {title}: Re-sync character so your taken points count"));
     store::save(&st.path, &st.saved)?;
     let _ = app.emit("plan", panel_view_of(&st));
+    let _ = app.emit("gems", ());
     Ok(())
 }
 
-/// Shows the Main window, at `section` ("tree", "build" or "settings") when given;
+/// Shows the Main window, at `section` ("tree", "gems", "build" or "settings") when given;
 /// otherwise the page picks (Build until a build is saved, then the last section used).
 fn open_main(app: &AppHandle, section: Option<&str>) {
     let Some(win) = app.get_webview_window("main") else { return };
@@ -811,7 +1071,9 @@ async fn update(app: AppHandle, menu: Menu<tauri::Wry>) {
     if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
         return eprintln!("update to {} failed: {e}", update.version);
     }
-    let panel_shown = app.get_webview_window("corner").and_then(|w| w.is_visible().ok()).unwrap_or(false);
+    let panel_shown = ["corner", GEM_PANEL]
+        .iter()
+        .any(|l| app.get_webview_window(l).and_then(|w| w.is_visible().ok()).unwrap_or(false));
     if !panel_shown {
         app.restart();
     }
@@ -891,6 +1153,9 @@ pub fn run() {
             set_spec,
             set_points,
             resync_character,
+            gems_view,
+            refresh_gems,
+            set_skill_set,
             app_info,
             restart_to_update,
             open_input_monitoring
@@ -900,7 +1165,8 @@ pub fn run() {
             let saved = store::load(&path);
             keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default() }));
+            upgrade_build(app.handle().clone());
 
             #[cfg(target_os = "macos")]
             {
@@ -919,6 +1185,17 @@ pub fn run() {
             }
             #[cfg(target_os = "windows")]
             no_activate(&win);
+            // the Gem panel follows the same rules: mouse only, never the keyboard
+            if let Some(gem_win) = app.get_webview_window(GEM_PANEL) {
+                place_in_corner(&gem_win);
+                #[cfg(target_os = "macos")]
+                {
+                    macos::make_nonactivating(&gem_win);
+                    macos::float_over_fullscreen(&gem_win);
+                }
+                #[cfg(target_os = "windows")]
+                no_activate(&gem_win);
+            }
 
             // closing the Main window only hides it, so the tray can reopen it
             if let Some(main) = app.get_webview_window("main") {
@@ -937,12 +1214,14 @@ pub fn run() {
             let tray_tx = tx.clone();
             app.manage(KeyTx(Mutex::new(tx.clone())));
             let panel_item = MenuItem::with_id(app, "panel", "Show/Hide panel", true, None::<&str>)?;
+            let gem_item = MenuItem::with_id(app, "gempanel", "Show/Hide gem panel", true, None::<&str>)?;
+            let gems_item = MenuItem::with_id(app, "gems", "Open gems…", true, None::<&str>)?;
             let tree_item = MenuItem::with_id(app, "tree", "Open tree…", true, None::<&str>)?;
             let build_item = MenuItem::with_id(app, "build", "Set up build…", true, None::<&str>)?;
             let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let resync_item = MenuItem::with_id(app, "resync", "Re-sync character…", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit POE Tracker", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&panel_item, &tree_item, &build_item, &settings_item, &resync_item, &quit])?;
+            let menu = Menu::with_items(app, &[&panel_item, &gem_item, &tree_item, &gems_item, &build_item, &settings_item, &resync_item, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("POE Tracker")
@@ -951,6 +1230,10 @@ pub fn run() {
                     "panel" => {
                         let _ = tray_tx.send(Msg::TogglePanel);
                     }
+                    "gempanel" => {
+                        let _ = tray_tx.send(Msg::ToggleGemPanel);
+                    }
+                    "gems" => open_main(app, Some("gems")),
                     "tree" => open_main(app, Some("tree")),
                     "build" => open_main(app, Some("build")),
                     "settings" => open_main(app, Some("settings")),

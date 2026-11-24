@@ -15,6 +15,16 @@ pub fn place(frame: Frame, panel: (f64, f64), spot: Option<(f64, f64)>) -> (f64,
     }
 }
 
+/// Room left at the game window's right edge for its gem level-up icons.
+const GEM_ICONS: f64 = 84.0;
+
+/// The Gem panel's default spot: just left of the gem level-up icons on the right
+/// edge, a little below the middle of the game window.
+pub fn beside_gem_icons(frame: Frame, panel: (f64, f64)) -> (f64, f64) {
+    let free = ((frame.w - panel.0).max(0.0), (frame.h - panel.1).max(0.0));
+    (frame.x + (free.0 - GEM_ICONS).max(0.0), frame.y + (frame.h * 0.58 - panel.1 / 2.0).clamp(0.0, free.1))
+}
+
 /// The spot for a panel the player dropped at (x, y), kept inside the game window.
 pub fn spot_of(frame: Frame, panel: (f64, f64), at: (f64, f64)) -> (f64, f64) {
     let free = ((frame.w - panel.0).max(1.0), (frame.h - panel.1).max(1.0));
@@ -38,6 +48,13 @@ mod tests {
         assert_eq!(spot, (0.0, 1.0));
         let bigger = Frame { w: 2000.0, h: 1200.0, ..GAME };
         assert_eq!(place(bigger, (400.0, 400.0), Some(spot)), (100.0, 50.0 + 800.0));
+    }
+
+    #[test]
+    fn the_gem_panel_sits_beside_the_level_up_icons() {
+        let (x, y) = beside_gem_icons(GAME, (276.0, 300.0));
+        assert_eq!(x, 100.0 + 1600.0 - 276.0 - 84.0);
+        assert!(y > 50.0 + 900.0 * 0.4 && y + 300.0 <= 950.0);
     }
 
     #[test]

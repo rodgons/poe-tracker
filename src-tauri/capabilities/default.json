@@ -3,6 +3,7 @@
   "identifier": "default",
   "windows": [
     "corner",
+    "gempanel",
     "main"
   ],
   "permissions": [
