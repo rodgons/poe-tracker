@@ -37,3 +37,12 @@ _Avoid_: Setup window, Build window
 **Panel hotkey**: The key combination (⌥/Alt+P unless the player rebinds it under Key binds in the Main window's Settings section) that toggles the Corner panel. Distinct from the game's own key for opening the passive tree, which the app ignores. While the game is in front the app takes the Panel hotkey from it, because the game ignores modifiers and would otherwise read ⌥/Alt+P as P.
 
 **Client log**: The `Client.txt` file the game appends to as things happen; the source of live allocation events.
+
+**Leveling guide**: The route through the Path of Exile 1 campaign, Acts 1–10, split into Guide steps, telling the player what to do in each zone. It follows the Character on its own: entering the area that ends the current Guide step moves it to the next, and entering the area of a later step skips ahead to that step. It never moves back by itself; any other area (a town, the hideout, an earlier zone) leaves it where it is.
+_Avoid_: Act tracker, campaign guide
+
+**Guide step**: One step of the Leveling guide: what to do in the current zone, ending with the area to enter next. Entering that area completes the step.
+
+**Guide panel**: A third small panel inside the game window, apart from the Corner panel and the Gem panel, that shows the current Guide step. Toggled by the Guide panel hotkey, movable, mouse only, and never shown outside the game.
+
+**Guide panel hotkey**: The key combination, rebindable under Key binds, that toggles the Guide panel. Distinct from the Panel hotkey and the Gem panel hotkey.
