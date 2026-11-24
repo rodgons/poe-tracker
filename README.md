@@ -12,7 +12,7 @@ Status: unsigned test builds (v0.x) for macOS, Windows and Linux. macOS is the p
   - **Settings**: Next points, the game log and key binds. Changes save straight away.
   - Problems that stop the app working (Input Monitoring off, ticking paused, `Client.txt` not found) show as a banner across every section, with a button to fix them.
 - **Corner panel**: toggled with ⌥/Alt+P while Path of Exile is in front, and only ever shown inside the game window. Scroll to zoom the Mini-tree, drag to move it, and drag the title to move the panel. It takes the mouse but never the keyboard.
-- **Re-sync character…** (tray, or the button in the Build section): imports the Character's points again from pathofexile.com.
+- **Re-sync character** (tray, or the button at the bottom of the Main window's sidebar, in every section): imports the Character's points again from pathofexile.com.
 - **Refunds in game**: the game logs a refund when you click the node, not when you Apply, so the panel marks it as a *Pending refund* and keeps the point. On your next area change the app checks your pathofexile.com profile once to see whether you applied it (or waits for Re-sync if the profile is private).
 
 ## Install a test build

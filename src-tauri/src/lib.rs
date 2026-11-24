@@ -655,7 +655,17 @@ fn resync(app: &AppHandle) {
             _ => None,
         }
     };
-    let Some((account, character, spec)) = job else { return open_main(app, Some("build")) };
+    let Some((account, character, spec)) = job else {
+        let has_build = app.state::<AppState>().lock().unwrap().saved.build.is_some();
+        if has_build {
+            let _ = app.emit_to(
+                "main",
+                "resync_error",
+                "Re-sync needs your pathofexile.com account: type it below, find your Character and Save.",
+            );
+        }
+        return open_main(app, Some("build"));
+    };
     let app = app.clone();
     std::thread::spawn(move || match import_allocated(&account, &character, &spec) {
         Ok(allocated) => {
@@ -668,6 +678,7 @@ fn resync(app: &AppHandle) {
             st.synced = Some(format!("Re-synced {character} from pathofexile.com"));
             let _ = store::save(&st.path, &st.saved);
             let _ = app.emit("plan", panel_view_of(&st));
+            let _ = app.emit_to("main", "resynced", format!("Re-synced {character}"));
         }
         Err(e) => {
             let _ = app.emit_to("main", "resync_error", format!("Re-sync failed: {e}"));

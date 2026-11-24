@@ -36,6 +36,11 @@
   nav .dot[hidden] { display: none; }
   nav footer { margin-top: auto; padding: 0 8px; display: flex; flex-direction: column; gap: 8px; font: 500 11px var(--mono); color: var(--plan); }
   nav footer button { font-size: 12px; padding: 6px 10px; }
+  /* Re-sync: reachable from every section once a Build is saved */
+  nav .sync { display: flex; flex-direction: column; gap: 4px; margin: 0 0 6px; }
+  nav .sync[hidden] { display: none; }
+  nav .sync span { font: 400 11px var(--body); color: var(--dim); min-height: 1.4em; }
+  nav .sync span.bad { color: var(--refund); }
 
   #content { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100vh; }
   /* problems that touch the whole app, each with a way to fix it */
@@ -133,7 +138,12 @@
   <button class="go" data-go="tree">Tree</button>
   <button class="go" data-go="build">Build <i class="dot" id="draftDot" hidden title="Not saved"></i></button>
   <button class="go" data-go="settings">Settings</button>
-  <footer><span id="version"></span><button id="update" hidden></button></footer>
+  <footer>
+    <div class="sync" id="sync" hidden>
+      <button class="ghost" id="resync" title="Import the Character's taken points from pathofexile.com again">Re-sync character</button>
+      <span id="synced" role="status"></span>
+    </div>
+    <span id="version"></span><button id="update" hidden></button></footer>
 </nav>
 
 <div id="content">
@@ -160,7 +170,6 @@
         <div class="row" style="margin-top:0">
           <input id="character" spellcheck="false" autocomplete="off">
           <select id="charPick" hidden style="flex:1"></select>
-          <button class="ghost" id="resync" hidden title="Import the Character's taken points from pathofexile.com again">Re-sync character</button>
         </div>
         <label class="gap">Points already taken</label>
         <label class="opt"><input type="radio" name="seed" value="import"> Import from pathofexile.com <small class="hint" style="margin:0">(your Characters tab must be public)</small></label>
@@ -440,8 +449,18 @@
       $('save').disabled = false; $('save').textContent = 'Save'
     }
   }
-  $('resync').onclick = () => { $('saveErr').textContent = ''; invoke('resync_character') }
-  listen('resync_error', e => { setSeed('import'); $('saveErr').textContent = e.payload; show('build') })
+  // ---- Re-sync (sidebar) ----
+  function synced(text, bad) {
+    $('synced').textContent = text; $('synced').classList.toggle('bad', !!bad)
+    $('resync').disabled = false; $('resync').textContent = 'Re-sync character'
+  }
+  $('resync').onclick = () => {
+    $('saveErr').textContent = ''
+    $('resync').disabled = true; $('resync').textContent = 'Re-syncing…'; $('synced').textContent = ''
+    invoke('resync_character')
+  }
+  listen('resynced', e => synced(e.payload))
+  listen('resync_error', e => { synced(String(e.payload).startsWith('Re-sync needs') ? 'Needs your account' : 'Re-sync failed', true); setSeed('import'); $('saveErr').textContent = e.payload; show('build') })
 
   // the saved build as it stands, into the Build section (unless there's a draft) and Settings
   async function loadSetup(first) {
@@ -449,7 +468,7 @@
     hasBuild = s.specs.length > 0
     showLog(s.log_path)
     if (document.activeElement !== $('points')) $('points').value = s.points
-    $('resync').hidden = !hasBuild || !s.account
+    $('sync').hidden = !hasBuild
     if (draft) return
     if (first) {
       $('input').value = s.input
