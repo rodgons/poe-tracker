@@ -8,7 +8,7 @@
      Every line of the step, hints under their line, the area to enter next set apart at the end. */
   :root {
     --ink: #e0d6c3; --dim: #aa9e82; --faint: #4a4135;
-    --alloc: #d9b45a; --next: #8888ff; --plan: #8a8072; --kill: #e09a4f; --item: #c9b98f;
+    --alloc: #d9b45a; --next: #8888ff; --plan: #8a8072; --kill: #e09a4f; --item: #c9b98f; --ok: #7fbf6a; --refund: #e04a3f;
     --panel: rgba(11, 10, 8, .92); --edge: #6e5a3a; --rule: #3b3328;
     --body: -apple-system, "Segoe UI", system-ui, sans-serif;
     --mono: ui-monospace, Menlo, Consolas, monospace;
@@ -39,7 +39,7 @@
 <script>
   const { invoke } = window.__TAURI__.core
   const { listen } = window.__TAURI__.event
-  const { esc, line } = GuideParts
+  const { esc, line, gems, exp } = GuideParts
   document.querySelector('style').textContent += GuideParts.css
   const panel = document.getElementById('panel')
   let hotkey = KeyLabel.format({ code: 'KeyL', alt: true })
@@ -57,8 +57,8 @@
       return
     }
     const s = v.steps[v.step]
-    const rows = s.lines.map((l, i) => `<li class="${i === s.lines.length - 1 && s.to ? 'last' : ''}">${line(l.parts)}${l.subs.map(x => `<div class="sub">${line(x)}</div>`).join('')}</li>`).join('')
-    panel.innerHTML = `<ol>${rows}</ol><footer><span>Act ${s.act} · step ${v.step + 1}/${total}</span>${keys}${nav}</footer>`
+    const rows = s.lines.map((l, i) => `<li class="${i === s.lines.length - 1 && s.to ? 'last' : ''}">${line(l.parts)}${l.subs.map(x => `<div class="sub">${line(x)}</div>`).join('')}${gems(l.gems)}</li>`).join('')
+    panel.innerHTML = `<ol>${rows}</ol><footer><span>Act ${s.act} · step ${v.step + 1}/${total}</span>${keys}${exp(v)}${nav}</footer>`
   }
 
   const load = () => invoke('guide_view').then(v => { view = v; render() })
@@ -70,6 +70,7 @@
   invoke('key_binds').then(useBinds)
   listen('binds', e => useBinds(e.payload))
 
+  GuideParts.copyOnClick(panel)
   panel.addEventListener('click', e => {
     const b = e.target.closest('button[data-go]')
     if (b && view) invoke('guide_jump', { step: Math.max(0, view.step + Number(b.dataset.go)) })

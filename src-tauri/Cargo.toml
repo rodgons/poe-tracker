@@ -1,6 +1,6 @@
 [package]
 name = "poe-tracker"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 license = "GPL-3.0-only"
 
@@ -33,6 +33,8 @@ ureq = "2"
 rdev = { git = "https://github.com/Narsil/rdev", rev = "b7e201bf80be7b9632207366f277d29fe732b9c1", features = ["x11"] }
 # remembers the Main window's size and position
 tauri-plugin-window-state = "2"
+# copies gem names from panels that never take focus
+tauri-plugin-clipboard-manager = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

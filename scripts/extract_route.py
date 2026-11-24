@@ -6,7 +6,7 @@
 # #ifndef around it (the app applies league start / bandit choice and groups the lines into
 # Guide steps at runtime, as exile-leveling does). Fragments are [kind, args...] lists, plain
 # text is a string, # comments are dropped. Also keeps the slim tables the app needs: areas
-# (name, act, level, town), quests' gem reward offers, gems (name, required level) and the
+# (name, act, level, town), quests' gem reward offers in order, each class's starting gems, gems (name, required level) and the
 # id lookups that map Path of Building gem ids onto them.
 import json, re, subprocess, sys
 from pathlib import Path
@@ -70,15 +70,17 @@ for act in range(1, 11):
     if stack:
         sys.exit(f'act {act}: expected #endif')
 
+characters = json.loads((data / 'json' / 'characters.json').read_text())
 gem_ids = set()
 slim_quests = {}
 for qid, q in quests.items():
-    offers = {}
+    offers = []
     for oid, o in q['reward_offers'].items():
         take = {g: r['classes'] for g, r in o.get('quest', {}).items()}
         buy = {g: {'classes': r['classes'], 'npc': r.get('npc', '')} for g, r in o.get('vendor', {}).items()}
         gem_ids.update(take, buy)
-        offers[oid] = {'npc': o.get('quest_npc', ''), 'take': take, 'buy': buy}
+        offers.append([oid, {'npc': o.get('quest_npc', ''), 'take': take, 'buy': buy}])
+    # a list: which gem a hand-in gives depends on the offers' order
     slim_quests[qid] = {'name': q['name'], 'offers': offers}
 
 process = (repo / 'web' / 'src' / 'state' / 'pob' / 'process.ts').read_text()
@@ -91,6 +93,8 @@ out = {
     'lines': lines,
     'areas': {a['id']: {'name': a['name'], 'act': a['act'], 'level': a['level'], 'town': a['is_town_area']} for a in areas.values()},
     'quests': slim_quests,
+    # each class's starting gem and the gem in Lioneye's first chest: never a quest reward to pick
+    'characters': {c: [v['start_gem_id'], v['chest_gem_id']] for c, v in characters.items()},
     'gems': {g: {'name': gems[g]['name'], 'level': gems[g]['required_level']} for g in sorted(gem_ids) if g in gems},
     'remap': remap,
     'vaal': json.loads((data / 'json' / 'vaal-gem-lookup.json').read_text()),

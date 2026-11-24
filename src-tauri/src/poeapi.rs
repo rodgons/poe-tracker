@@ -113,7 +113,8 @@ pub struct OwnedGem {
     pub icon: String,
 }
 
-pub fn items(account: &str, character: &str) -> Result<Vec<OwnedGem>, String> {
+/// The Character's socketed gems, and its level when the answer gives it.
+pub fn items(account: &str, character: &str) -> Result<(Vec<OwnedGem>, Option<u32>), String> {
     let url = format!(
         "{SITE}/get-items?accountName={}&character={}&realm=pc",
         account_param(account),
@@ -125,10 +126,17 @@ pub fn items(account: &str, character: &str) -> Result<Vec<OwnedGem>, String> {
 /// Slots the gem comparison ignores: weapon swap, flasks and anything not worn.
 const SKIPPED_SLOTS: [&str; 4] = ["Weapon2", "Offhand2", "Flask", "MainInventory"];
 
-fn parse_items(body: &str) -> Result<Vec<OwnedGem>, String> {
+fn parse_items(body: &str) -> Result<(Vec<OwnedGem>, Option<u32>), String> {
     #[derive(Deserialize)]
     struct Items {
         items: Vec<Item>,
+        #[serde(default)]
+        character: Option<Who>,
+    }
+    #[derive(Deserialize)]
+    struct Who {
+        #[serde(default)]
+        level: Option<u32>,
     }
     #[derive(Deserialize)]
     struct Item {
@@ -205,7 +213,7 @@ fn parse_items(body: &str) -> Result<Vec<OwnedGem>, String> {
             });
         }
     }
-    Ok(gems)
+    Ok((gems, parsed.character.and_then(|c| c.level)))
 }
 
 fn get(url: &str) -> Result<String, String> {
@@ -274,8 +282,9 @@ mod tests {
               {"socket":2,"support":false,"typeLine":"Herald of Ash","icon":"https://web.poecdn.com/gen/image/x/HeraldOfAsh.png","properties":[{"name":"Level","values":[["7",0]]}]}]},
             {"inventoryId":"Belt","sockets":[{"group":0}],"socketedItems":[{"socket":0,"abyssJewel":true,"typeLine":"Murderous Eye Jewel"}]},
             {"inventoryId":"Weapon2","sockets":[{"group":0}],"socketedItems":[{"socket":0,"support":false,"typeLine":"Dash"}]}],
-            "character":{"name":"x"}}"#;
-        let gems = parse_items(body).unwrap();
+            "character":{"name":"x","level":12}}"#;
+        let (gems, level) = parse_items(body).unwrap();
+        assert_eq!(level, Some(12));
         assert_eq!(gems.len(), 3, "abyss jewels and weapon swap are left out");
         assert_eq!((gems[0].level, gems[0].quality, gems[0].support), (20, 23, true));
         assert_eq!(gems[1].vaal_base.as_deref(), Some("Molten Shell"));

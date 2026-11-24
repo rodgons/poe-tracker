@@ -13,6 +13,8 @@ pub struct GuideProgress {
     /// the current Guide step; the step count when the campaign is done
     pub step: usize,
     pub options: guide::Options,
+    /// the Character's level, from the log's level-up lines and the items import
+    pub level: Option<u32>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

@@ -2,7 +2,7 @@
 // cut into Guide steps that each end with the area to enter next. Entering that area, or a
 // later step's area, moves the guide on; nothing moves it back except the player.
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 /// One piece of a route line: plain text, or a fragment like ["enter", "1_1_2"].
@@ -25,10 +25,34 @@ struct RawLine {
 #[derive(Deserialize)]
 pub struct Area {
     pub name: String,
+    /// the monster level, which sets the experience penalty
+    pub level: u32,
+}
+
+/// What one way of finishing a quest offers: a gem to take as the reward (by the
+/// classes that may take it) and gems the NPC sells from then on.
+#[derive(Deserialize)]
+struct Offer {
+    npc: String,
+    take: HashMap<String, Vec<String>>,
+    buy: HashMap<String, Buy>,
+}
+
+#[derive(Deserialize)]
+struct Buy {
+    classes: Vec<String>,
+    npc: String,
 }
 
 #[derive(Deserialize)]
 struct Quest {
+    name: String,
+    /// in the game's order, which decides the gem a hand-in gives
+    offers: Vec<(String, Offer)>,
+}
+
+#[derive(Deserialize)]
+struct GemInfo {
     name: String,
 }
 
@@ -39,6 +63,14 @@ pub struct Route {
     lines: Vec<RawLine>,
     pub areas: HashMap<String, Area>,
     quests: HashMap<String, Quest>,
+    gems: HashMap<String, GemInfo>,
+    /// Path of Building gem ids that differ from the game's
+    remap: HashMap<String, String>,
+    /// Vaal and Awakened gems → the plain gem a quest gives
+    vaal: HashMap<String, String>,
+    awakened: HashMap<String, String>,
+    /// each class's starting gem and first-chest gem
+    characters: HashMap<String, (String, String)>,
 }
 
 pub fn route() -> &'static Route {
@@ -101,6 +133,49 @@ pub struct Line {
     pub parts: Vec<Part>,
     /// hints under the line
     pub subs: Vec<Vec<Part>>,
+    /// the Build's gems to take or buy at this line's quest hand-ins
+    pub gems: Vec<GemPick>,
+    /// the quests handed in on this line, with the reward offers they count
+    #[serde(skip)]
+    quests: Vec<(String, Vec<String>)>,
+}
+
+/// A gem of the Build to collect at a quest hand-in.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct GemPick {
+    /// the name to search for in the game ("Added Fire Damage Support")
+    pub name: String,
+    /// bought from the NPC rather than taken as the quest reward
+    pub buy: bool,
+    pub npc: String,
+    /// the Character already has it in a worn item
+    pub socketed: bool,
+}
+
+/// What the gem lines need to know about the Build and the Character.
+pub struct GemPlan {
+    /// the Character's base class ("Witch")
+    pub class: String,
+    /// the Build's gems as quest-reward ids, in the Build's order, each once
+    pub wanted: Vec<String>,
+    /// lowercased names of the gems in the Character's worn items
+    pub socketed: HashSet<String>,
+}
+
+impl Route {
+    /// The quest-reward id for a Path of Building gem: PoB's id put right, Vaal and
+    /// Awakened gems as the gem a quest gives. Builds saved before gem ids were kept
+    /// go by name.
+    pub fn reward_id(&self, pob_id: &str, name: &str) -> Option<String> {
+        if pob_id.is_empty() {
+            let support = format!("{name} Support");
+            return self.gems.iter().find(|(_, g)| g.name == name || g.name == support).map(|(id, _)| id.clone());
+        }
+        let mut id = self.remap.get(pob_id).map_or(pob_id, String::as_str);
+        id = self.vaal.get(id).map_or(id, String::as_str);
+        id = self.awakened.get(id).map_or(id, String::as_str);
+        Some(id.to_string())
+    }
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -163,9 +238,19 @@ pub fn steps(route: &Route, options: &Options) -> Vec<Step> {
             RawPart::Fragment(f) if f[0] == "enter" => f.get(1).cloned(),
             _ => None,
         });
+        let quests = raw
+            .parts
+            .iter()
+            .filter_map(|p| match p {
+                RawPart::Fragment(f) if f[0] == "quest" && f.len() > 1 => Some((f[1].clone(), f[2..].to_vec())),
+                _ => None,
+            })
+            .collect();
         lines.push(Line {
             parts: raw.parts.iter().map(|p| part(route, p)).collect(),
             subs: raw.subs.iter().map(|s| s.iter().map(|p| part(route, p)).collect()).collect(),
+            gems: Vec::new(),
+            quests,
         });
         if let Some(to) = enters {
             let to_name = route.areas.get(&to).map(|a| a.name.clone());
@@ -176,6 +261,57 @@ pub fn steps(route: &Route, options: &Options) -> Vec<Step> {
         steps.push(Step { act, lines, to: None, to_name: None });
     }
     steps
+}
+
+/// Fills in each line's gems to take or buy, as exile-leveling does: walking the route
+/// in order, each hand-in gives the first gem of the Build its class may take that it
+/// isn't getting already, and its NPCs sell every gem of the Build not taken or bought
+/// before. The class's starting gems are never picked as rewards.
+pub fn pick_gems(route: &Route, steps: &mut [Step], plan: &GemPlan) {
+    let allowed = |classes: &[String]| classes.is_empty() || classes.contains(&plan.class);
+    let mut taken: HashSet<&str> = HashSet::new();
+    if let Some((start, chest)) = route.characters.get(&plan.class) {
+        taken.extend([start.as_str(), chest.as_str()]);
+    }
+    let mut bought: HashSet<&str> = HashSet::new();
+    let pick = |id: &str, buy: bool, npc: &str| {
+        let name = route.gems.get(id).map_or_else(|| id.to_string(), |g| g.name.clone());
+        let socketed = plan.socketed.contains(&name.to_lowercase());
+        GemPick { name, buy, npc: npc.to_string(), socketed }
+    };
+    for line in steps.iter_mut().flat_map(|s| s.lines.iter_mut()) {
+        for (quest_id, chosen) in &line.quests {
+            let Some(quest) = route.quests.get(quest_id) else { continue };
+            let offers: Vec<&Offer> =
+                quest.offers.iter().filter(|(id, _)| chosen.is_empty() || chosen.contains(id)).map(|(_, o)| o).collect();
+            for offer in &offers {
+                let reward = plan.wanted.iter().find(|id| {
+                    !taken.contains(id.as_str()) && offer.take.get(id.as_str()).is_some_and(|c| allowed(c))
+                });
+                if let Some(id) = reward {
+                    taken.insert(id);
+                    line.gems.push(pick(id, false, &offer.npc));
+                }
+            }
+            for offer in &offers {
+                for id in &plan.wanted {
+                    if taken.contains(id.as_str()) || bought.contains(id.as_str()) {
+                        continue;
+                    }
+                    if let Some(buy) = offer.buy.get(id).filter(|b| allowed(&b.classes)) {
+                        bought.insert(id);
+                        line.gems.push(pick(id, true, &buy.npc));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The area levels around the Character's `level` that give full experience.
+pub fn full_exp(level: u32) -> (u32, u32) {
+    let margin = 3 + level / 16;
+    (level.saturating_sub(margin).max(1), level + margin)
 }
 
 /// Where the guide goes when the Character enters `area` while on step `current`: past
@@ -265,6 +401,72 @@ mod tests {
         assert!(kill.contains("Oak") && kill.contains("Kraityn") && kill.contains("Alira"));
     }
 
+    fn plan(class: &str, names: &[&str]) -> GemPlan {
+        let r = route();
+        GemPlan {
+            class: class.into(),
+            wanted: names.iter().map(|n| r.reward_id("", n).unwrap_or_else(|| panic!("{n}"))).collect(),
+            socketed: HashSet::new(),
+        }
+    }
+
+    fn picks(class: &str, names: &[&str]) -> Vec<(u8, String, bool, String)> {
+        let r = route();
+        let mut s = steps(r, &Options::default());
+        pick_gems(r, &mut s, &plan(class, names));
+        s.iter().flat_map(|s| s.lines.iter().flat_map(move |l| l.gems.iter().map(move |g| (s.act, g.name.clone(), g.buy, g.npc.clone())))).collect()
+    }
+
+    #[test]
+    fn the_first_hand_in_gives_the_builds_gem() {
+        let got = picks("Witch", &["Freezing Pulse", "Frostblink"]);
+        assert_eq!(got[0], (1, "Freezing Pulse".into(), false, "Tarkleigh".into()));
+        // each gem once: taken or bought, never both
+        let names: Vec<_> = got.iter().map(|g| g.1.as_str()).collect();
+        assert_eq!(names.iter().filter(|n| **n == "Freezing Pulse").count(), 1);
+        assert_eq!(names.iter().filter(|n| **n == "Frostblink").count(), 1);
+    }
+
+    #[test]
+    fn a_gem_the_class_cant_take_is_bought() {
+        // Marauders can't take Freezing Pulse from Enemy at the Gate
+        let got = picks("Marauder", &["Freezing Pulse"]);
+        assert_eq!(got.len(), 1);
+        assert!(got[0].2, "bought: {got:?}");
+    }
+
+    #[test]
+    fn the_starting_gem_is_never_picked_as_a_reward() {
+        let got = picks("Witch", &["Fireball"]);
+        assert!(got.iter().all(|g| g.2), "Fireball only bought, if at all: {got:?}");
+    }
+
+    #[test]
+    fn socketed_gems_are_marked() {
+        let r = route();
+        let mut s = steps(r, &Options::default());
+        let mut p = plan("Witch", &["Freezing Pulse"]);
+        p.socketed.insert("freezing pulse".into());
+        pick_gems(r, &mut s, &p);
+        assert!(s.iter().flat_map(|s| &s.lines).flat_map(|l| &l.gems).all(|g| g.socketed));
+    }
+
+    #[test]
+    fn pob_ids_are_put_right() {
+        let r = route();
+        assert_eq!(r.reward_id("Metadata/Items/Gems/SkillGemVaalFireball", "Vaal Fireball").as_deref(), Some("Metadata/Items/Gems/SkillGemFireball"));
+        assert_eq!(r.reward_id("Metadata/Items/Gems/Smite", "Smite").as_deref(), Some("Metadata/Items/Gems/SkillGemSmite"));
+        assert_eq!(r.reward_id("", "Added Fire Damage").as_deref(), Some("Metadata/Items/Gems/SupportGemAddedFireDamage"));
+    }
+
+    #[test]
+    fn full_experience_widens_with_level() {
+        assert_eq!(full_exp(1), (1, 4));
+        assert_eq!(full_exp(10), (7, 13));
+        assert_eq!(full_exp(32), (27, 37));
+        assert_eq!(full_exp(68), (61, 75));
+    }
+
     fn mini() -> Vec<Step> {
         ["a", "b", "town", "c", "b", "d"]
             .iter()
@@ -313,5 +515,29 @@ mod tests {
     fn a_new_character_catches_up_on_its_first_campaign_area() {
         // no progress yet: the first area entered lands right after its first step
         assert_eq!(advance(&mini(), 0, "c"), 4);
+    }
+}
+
+#[cfg(test)]
+mod build_tests {
+    use super::*;
+
+    #[test]
+    fn the_test_build_gets_its_gems() {
+        let r = route();
+        let b = crate::pob::decode(include_str!("../tests/pohx-rf.txt")).unwrap();
+        let mut wanted = Vec::new();
+        for g in b.skill_sets.iter().flat_map(|s| &s.groups).filter(|g| g.enabled && !g.granted).flat_map(|g| &g.gems).filter(|g| g.enabled) {
+            if let Some(id) = r.reward_id(&g.id, &g.name) {
+                if !wanted.contains(&id) {
+                    wanted.push(id);
+                }
+            }
+        }
+        let mut s = steps(r, &Options::default());
+        pick_gems(r, &mut s, &GemPlan { class: "Marauder".into(), wanted, socketed: HashSet::new() });
+        let got: Vec<String> = s.iter().flat_map(|s| s.lines.iter().flat_map(move |l| l.gems.iter().map(move |g| format!("A{} {} {} ({})", s.act, if g.buy { "$" } else { "★" }, g.name, g.npc)))).collect();
+        assert!(got[0].starts_with("A1 ★"), "{got:?}");
+        assert!(got.iter().any(|g| g.contains("Righteous Fire")), "{got:?}");
     }
 }
