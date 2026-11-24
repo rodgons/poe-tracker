@@ -54,3 +54,9 @@ Pushing a `task/**` branch builds all three platforms in CI and publishes a prer
 
 - [`docs/adr/`](docs/adr): decisions, such as Tauri over Electron.
 - [`docs/research/overlay-field-guide.md`](docs/research/overlay-field-guide.md): the original research on GGG's policy, overlay windows on each OS and the log format.
+
+## License
+
+[GPL-3.0](LICENSE). You may use, change and share this app, but anything you distribute that is built from it must also be released under GPL-3.0 with its source.
+
+Path of Exile is a trademark of Grinding Gear Games. This is a fan-made tool, not affiliated with or endorsed by Grinding Gear Games.
