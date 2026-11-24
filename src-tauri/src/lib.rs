@@ -90,6 +90,9 @@ type AppState = Mutex<App>;
 struct SpecChoice {
     title: String,
     points: usize,
+    /// the spec's Ascendancy and its point count; None when it has none
+    ascendancy: Option<String>,
+    asc_points: usize,
 }
 
 #[derive(Serialize)]
@@ -106,6 +109,8 @@ struct Setup {
     character: String,
     spec: usize,
     taken: usize,
+    /// Ascendancy points taken
+    asc_taken: usize,
     /// how many Next points the panel shows
     points: usize,
     specs: Vec<SpecChoice>,
@@ -499,9 +504,15 @@ fn spec_choices(build: &pob::Build) -> Vec<SpecChoice> {
     build
         .specs
         .iter()
-        .map(|s| SpecChoice {
-            title: s.title.clone(),
-            points: tree::Plan::new(tree::tree(), s).map_or(0, |p| p.nodes.len()),
+        .map(|s| {
+            let plan = tree::Plan::new(tree::tree(), s).ok();
+            let asc = plan.as_ref().and_then(|p| p.asc.as_ref());
+            SpecChoice {
+                title: s.title.clone(),
+                points: plan.as_ref().map_or(0, |p| p.nodes.len()),
+                ascendancy: asc.map(|a| a.name.clone()),
+                asc_points: asc.map_or(0, |a| a.nodes.len()),
+            }
         })
         .collect()
 }
@@ -534,7 +545,7 @@ fn panel_view_of(app: &App) -> Option<tree::PanelView> {
     }
     if !app.refunding.is_empty() {
         let t = tree::tree();
-        let names: Vec<&str> = app.refunding.iter().filter_map(|n| t.nodes.get(n)).map(|n| n.name.as_str()).collect();
+        let names: Vec<&str> = app.refunding.iter().filter_map(|n| t.node(*n)).map(|n| n.name.as_str()).collect();
         let when = if app.refund_unchecked || app.saved.account.is_empty() {
             "Re-sync character once applied"
         } else {
@@ -564,9 +575,9 @@ fn on_log_line(handle: &AppHandle, line: &str) {
             let Some(build) = app.saved.build.as_ref() else { return };
             let Some(Ok(plan)) = build.specs.get(app.saved.spec).map(|s| tree::Plan::new(t, s)) else { return };
             let have: HashSet<u32> = app.saved.allocated.iter().copied().collect();
-            match t.node_for_log(&id, &name, plan.order(t, &have)) {
-                // nodes outside the main tree (ascendancy, cluster jewels) are left out
-                Some(hash) if t.nodes.contains_key(&hash) && !have.contains(&hash) => {
+            match t.node_for_log(&id, &name, plan.candidates(t, &have)) {
+                // nodes the app doesn't track (Bloodlines, cluster jewels) are left out
+                Some(hash) if t.knows(hash) && !have.contains(&hash) => {
                     app.saved.allocated.push(hash);
                     true
                 }
@@ -694,6 +705,7 @@ fn current_setup(state: State<'_, AppState>) -> Setup {
         character: saved.character.clone(),
         spec: saved.spec,
         taken: panel_view_of(&app).map_or(0, |v| v.done),
+        asc_taken: panel_view_of(&app).and_then(|v| v.asc).map_or(0, |a| a.done),
         points: saved.points,
         specs: saved.build.as_ref().map(spec_choices).unwrap_or_default(),
         tree_version: tree::tree().version.clone(),
@@ -757,14 +769,15 @@ async fn find_characters(account: String) -> Result<Vec<poeapi::Character>, Stri
     tauri::async_runtime::spawn_blocking(move || poeapi::characters(&account)).await.map_err(|e| e.to_string())?
 }
 
-/// Saves the setup. With `taken` the Seed is the first points in order; without,
-/// it's imported from pathofexile.com.
+/// Saves the setup. With `taken` the Seed is the first points in order (and the first
+/// `asc_taken` Ascendancy points); without, it's imported from pathofexile.com.
 #[tauri::command]
 async fn save_setup(
     spec: usize,
     account: String,
     character: String,
     taken: Option<usize>,
+    asc_taken: Option<usize>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
@@ -774,17 +787,19 @@ async fn save_setup(
         let build = st.pending.as_ref().map(|(_, b)| b).or(st.saved.build.as_ref()).ok_or("Load a build first.")?;
         // re-saving the same spec with the taken count as it stands (say, to fix the
         // character name) keeps the exact points, not the first ones in order
+        let view = panel_view_of(&st);
         let unchanged = st.pending.is_none()
             && spec == st.saved.spec
             && taken.is_some()
-            && taken == panel_view_of(&st).map(|v| v.done);
+            && taken == view.as_ref().map(|v| v.done)
+            && asc_taken.unwrap_or(0) == view.and_then(|v| v.asc).map_or(0, |a| a.done);
         (build.specs.get(spec).ok_or("Pick a tree spec.")?.clone(), unchanged.then(|| st.saved.allocated.clone()))
     };
     let allocated = match (kept, taken) {
         (Some(kept), _) => kept,
         (None, Some(taken)) => {
             let plan = tree::Plan::new(tree::tree(), &chosen)?;
-            let mut allocated: Vec<u32> = plan.seed(tree::tree(), taken).into_iter().collect();
+            let mut allocated: Vec<u32> = plan.seed(tree::tree(), taken, asc_taken.unwrap_or(0)).into_iter().collect();
             allocated.sort_unstable();
             allocated
         }
@@ -993,6 +1008,8 @@ fn panel_view(state: State<'_, AppState>) -> Option<tree::PanelView> {
 struct BuildView {
     view: tree::PanelView,
     points: Vec<tree::ListedPoint>,
+    /// the Ascendancy's points, listed apart; empty when the spec has none
+    asc_points: Vec<tree::ListedPoint>,
     specs: Vec<SpecChoice>,
     spec: usize,
     character: String,
@@ -1005,12 +1022,18 @@ fn build_view(state: State<'_, AppState>) -> Option<BuildView> {
     let build = saved.build.as_ref()?;
     let allocated: HashSet<u32> = saved.allocated.iter().copied().collect();
     // an unreadable spec still opens, so the player can pick another one
-    let points = tree::Plan::new(tree::tree(), build.specs.get(saved.spec)?)
-        .map(|plan| plan.points(tree::tree(), &allocated))
+    let plan = tree::Plan::new(tree::tree(), build.specs.get(saved.spec)?);
+    let points = plan.as_ref().map(|plan| plan.points(tree::tree(), &allocated)).unwrap_or_default();
+    let asc_points = plan
+        .as_ref()
+        .ok()
+        .and_then(|p| p.asc.as_ref())
+        .map(|a| a.points(tree::tree(), &allocated))
         .unwrap_or_default();
     Some(BuildView {
         view: panel_view_of(&app)?,
         points,
+        asc_points,
         specs: spec_choices(build),
         spec: saved.spec,
         character: saved.character.clone(),

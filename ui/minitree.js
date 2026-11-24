@@ -30,10 +30,12 @@ const MiniTree = (() => {
       + `<path d="M${tip}L${b1}L${b2}Z" fill="var(--ink)" pointer-events="none"/>`
   }
 
-  /** SVG for view `v`, `width` CSS pixels wide with height = width × `ratio`. */
-  function draw(v, width, ratio, cam) {
+  /** SVG for view `v`, `width` CSS pixels wide with height = width × `ratio`. Options: `cls` the SVG's
+   *  class (the mouse only zooms and drags 'minitree'), `all` frames every node rather than the spec's,
+   *  `names` false draws the numbers without names, `size` scales the nodes, `label` for screen readers. */
+  function draw(v, width, ratio, cam, { cls = 'minitree', all = false, names: named = true, size = 1, label = 'Passive tree' } = {}) {
     const by = Object.fromEntries(v.nodes.map(n => [n.id, n]))
-    const mine = v.nodes.filter(n => n.s !== 'other'), pad = 160
+    const mine = all ? v.nodes : v.nodes.filter(n => n.s !== 'other'), pad = 160
     // nothing to frame (an empty spec): an empty stage, not a NaN viewBox
     if (!mine.length) return `<svg viewBox="0 0 ${width} ${Math.round(width * ratio)}" xmlns="http://www.w3.org/2000/svg"></svg>`
     let x0 = Math.min(...mine.map(n => n.x)) - pad, y0 = Math.min(...mine.map(n => n.y)) - pad
@@ -64,7 +66,7 @@ const MiniTree = (() => {
     }
     const next = [], names = []
     for (const n of v.nodes) {
-      const r = R[n.k] * (n.s === 'other' ? .7 : 1)
+      const r = R[n.k] * size * (n.s === 'other' ? .7 : 1)
       // taken points are solid; Next points and Refunds are hollow, told apart by the badge and the cross
       const fill = n.s === 'alloc' ? 'var(--alloc)' : n.s === 'next' || n.s === 'refund' ? 'var(--scene)' : 'var(--scene2)'
       const attrs = `data-id="${n.id}" fill="${fill}" stroke="${col[n.s]}" stroke-width="${(n.s === 'next' ? 2.4 : 1.4) * u}"`
@@ -80,8 +82,17 @@ const MiniTree = (() => {
       const named = n.s === 'refund' || (n.k !== 'small' && n.k !== 'start' && n.k !== 'mastery' && n.s !== 'other')
       if (named) names.push({ n, r, rank: n.s === 'refund' ? 0 : n.k === 'keystone' ? 1 : n.s === 'alloc' ? 2 : 3 })
     }
-    g += marks(next, names, u, cam.frame)
-    return `<svg style="user-select:none;-webkit-user-select:none" class="minitree${cam.zoom > 1 ? ' zoomed' : ''}${cam.drag ? ' dragging' : ''}" viewBox="${x0} ${y0} ${w} ${h}" role="img" aria-label="Passive tree">${g}</svg>`
+    g += marks(next, named ? names : [], u, cam.frame, named)
+    return `<svg style="user-select:none;-webkit-user-select:none" class="${cls}${cam.zoom > 1 ? ' zoomed' : ''}${cam.drag ? ' dragging' : ''}" viewBox="${x0} ${y0} ${w} ${h}" role="img" aria-label="${esc(label)}">${g}</svg>`
+  }
+
+  /** The Ascendancy inset: its name and Ascendancy points over the whole Ascendancy, `width` CSS pixels
+   *  wide, drawn at a fixed frame (the mouse never zooms or drags it). Names only when `names`. */
+  function inset(a, width, { names = false, pending = [] } = {}) {
+    const [x0, y0, x1, y1] = a.bounds
+    const ratio = Math.min(1.2, Math.max(.6, (y1 - y0) / Math.max(1, x1 - x0)))
+    const svg = draw({ ...a, pending }, width, ratio, camera(1), { cls: 'asctree', all: true, names, size: .5, label: `${a.name} Ascendancy` })
+    return `<div class="asc" style="width:${width}px"><div class="asc-hd"><span>${esc(a.name)}</span><b>${a.done} / ${a.total}</b></div>${svg}</div>`
   }
 
   /** The Next points' numbered badges, then every name. Badges are placed in order, so 1 always keeps
@@ -89,7 +100,7 @@ const MiniTree = (() => {
    *  leader line. Names go next to their node only where they fit inside the frame without covering a badge
    *  or another name: Next points' first, then Refunds, keystones, taken and later points. A name with no
    *  room is left out (a Next point still shows its number). Badges are drawn last-to-first so 1 is on top. */
-  function marks(next, names, u, frame) {
+  function marks(next, names, u, frame, named = true) {
     next.sort((a, b) => a.n.i - b.n.i)
     const discs = [], boxes = []
     const fx0 = frame.x0 + 2 * u, fx1 = frame.x0 + frame.w - 2 * u, fy0 = frame.y0 + 2 * u, fy1 = frame.y0 + frame.h - 2 * u
@@ -130,7 +141,7 @@ const MiniTree = (() => {
       return null
     }
     let leaders = '', badgeSvg = '', nextNames = '', otherNames = ''
-    for (const p of next) {
+    for (const p of named ? next : []) {
       const name = p.n.n.split(' → ')[0], at = place(name, p.b, 3 * u)
       if (at) nextNames += `<text x="${at.x}" y="${at.y}" font-size="${fs}" text-anchor="${at.anchor}" fill="var(--next)" font-weight="600" stroke="var(--scene)" stroke-width="${3 * u}" stroke-linejoin="round" paint-order="stroke" pointer-events="none">${esc(name)}</text>`
     }
@@ -221,5 +232,5 @@ const MiniTree = (() => {
     cam.center = [cam.frame.cx + dx * cam.frame.w / 3, cam.frame.cy + dy * cam.frame.h / 3]
   }
 
-  return { draw, attach, camera, key, pan, esc, swatch }
+  return { draw, inset, attach, camera, key, pan, esc, swatch }
 })()

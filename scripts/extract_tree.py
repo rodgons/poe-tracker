@@ -3,8 +3,10 @@
 #   data.json: grindinggear/skilltree-export at the <version> tag
 #   Default.json: RePoE passive_skill_trees/Default.json for the same patch, for the
 #   string ids Client.txt prints (life_regeneration1087 → 55906)
-# Keeps main-tree nodes only (no ascendancy, no proxies), with positions precomputed;
-# the other hashes are listed under 'skip'.
+# Keeps main-tree nodes under 'nodes' and the class Ascendancies' nodes under 'asc'
+# (each tagged with its Ascendancy), with positions precomputed; Bloodline and proxy
+# hashes are listed under 'skip'. 'classes' lists each class's Ascendancies in
+# Path of Building's ascendClassId order.
 import sys, json, math
 
 data = json.load(open(sys.argv[1]))
@@ -28,7 +30,8 @@ def pos(v):
 
 
 def kind(v):
-    if 'classStartIndex' in v: return 'start'
+    if 'classStartIndex' in v or v.get('isAscendancyStart'): return 'start'
+    if v.get('isMultipleChoiceOption'): return 'option'
     if v.get('isKeystone'): return 'keystone'
     if v.get('isMastery'): return 'mastery'
     if v.get('isJewelSocket'): return 'jewel'
@@ -36,18 +39,31 @@ def kind(v):
     return 'small'
 
 
+classes = [[a['id'] for a in c['ascendancies']] for c in data['classes']]
+ascendancies = {a for c in classes for a in c}
 main = {k for k, v in nodes.items() if 'group' in v and not v.get('ascendancyName') and not v.get('isProxy')}
-out = {}
-for k in sorted(main, key=int):
+asc = {k for k, v in nodes.items() if 'group' in v and v.get('ascendancyName') in ascendancies}
+
+
+def slim(k, within):
     v = nodes[k]
     x, y = pos(v)
-    edges = sorted({int(o) for o in v.get('out', []) + v.get('in', []) if str(o) in main}
-                   | {int(j) for j, w in nodes.items() if j in main and k in map(str, w.get('out', []))})
+    edges = sorted({int(o) for o in v.get('out', []) + v.get('in', []) if str(o) in within}
+                   | {int(j) for j, w in nodes.items() if j in within and k in map(str, w.get('out', []))})
     n = {'n': v.get('name', ''), 'k': kind(v), 'x': x, 'y': y, 'e': edges, 'st': v.get('stats', [])}
     if 'classStartIndex' in v: n['c'] = v['classStartIndex']
     if v.get('masteryEffects'): n['m'] = {str(e['effect']): e['stats'] for e in v['masteryEffects']}
-    out[k] = n
-# ascendancy and proxy hashes, so the app can tell them apart from nodes a patch removed
-skip = sorted(int(k) for k in nodes if k not in main)
-ids = {p['id']: p['hash'] for p in repoe.values() if str(p['hash']) in main}
-json.dump({'version': version, 'skip': skip, 'ids': ids, 'nodes': out}, sys.stdout, separators=(',', ':'), ensure_ascii=False)
+    if v.get('ascendancyName'): n['a'] = v['ascendancyName']
+    return n
+
+
+out = {k: slim(k, main) for k in sorted(main, key=int)}
+by_asc = {}
+for k in asc:
+    by_asc.setdefault(nodes[k]['ascendancyName'], set()).add(k)
+asc_out = {k: slim(k, by_asc[nodes[k]['ascendancyName']]) for k in sorted(asc, key=int)}
+# Bloodline and proxy hashes, so the app can tell them apart from nodes a patch removed
+skip = sorted(int(k) for k in nodes if k not in main and k not in asc)
+ids = {p['id']: p['hash'] for p in repoe.values() if str(p['hash']) in main or str(p['hash']) in asc}
+json.dump({'version': version, 'classes': classes, 'skip': skip, 'ids': ids, 'nodes': out, 'asc': asc_out},
+          sys.stdout, separators=(',', ':'), ensure_ascii=False)

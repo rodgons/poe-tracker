@@ -66,7 +66,12 @@
   #stage svg { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
   svg.zoomed { cursor: grab; }
   svg.dragging { cursor: grabbing; }
-  #hint { position: absolute; left: 12px; bottom: 10px; color: var(--plan); font-size: 12px; pointer-events: none; }
+  #hint { position: absolute; right: 12px; bottom: 10px; color: var(--plan); font-size: 12px; pointer-events: none; }
+  /* the Ascendancy inset: bottom-left over the tree, never zoomed or dragged with it */
+  #stage .asc { position: absolute; left: 12px; bottom: 12px; background: var(--card); border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; }
+  #stage .asc svg { position: static; display: block; width: 100%; height: auto; }
+  .asc-hd { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px 0; font: 600 12px/1.2 var(--display); letter-spacing: .05em; color: var(--alloc); }
+  .asc-hd b { font: 500 11px var(--mono); color: var(--dim); }
   aside { width: 320px; border-left: 1px solid var(--edge); background: var(--card); overflow-y: auto; padding: 12px 14px; }
   aside h2 { font: 600 11px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 14px 0 6px; }
   aside h2:first-child { margin-top: 0; }
@@ -218,6 +223,7 @@
         <label class="opt"><input type="radio" name="seed" value="import"> Import from pathofexile.com <small class="hint" style="margin:0">(your Characters tab must be public)</small></label>
         <label class="opt"><input type="radio" name="seed" value="hand"> Set by hand</label>
         <div class="row indent"><input type="number" id="taken" min="0" value="0"><span class="hint" id="takenHint" style="margin:0"></span></div>
+        <div class="row indent" id="ascRow" hidden><input type="number" id="ascTaken" min="0" value="0" aria-label="Ascendancy points taken"><span class="hint" id="ascHint" style="margin:0"></span></div>
       </fieldset>
       <div class="actions"><p class="err" id="saveErr"></p><button id="save" disabled>Save</button></div>
     </div></div>
@@ -308,8 +314,11 @@
     const stage = $('stage')
     if (!stage || !data || current !== 'tree') return
     const w = Math.max(1, stage.clientWidth), h = Math.max(1, stage.clientHeight)
-    stage.querySelector('svg')?.remove()
+    stage.querySelector('svg.minitree')?.remove()
+    stage.querySelector('.asc')?.remove()
     stage.insertAdjacentHTML('afterbegin', MiniTree.draw(data.view, w, h / w, cam))
+    const a = data.view.asc
+    if (a) stage.insertAdjacentHTML('beforeend', MiniTree.inset(a, Math.round(Math.min(280, Math.max(160, w * .3))), { names: true, pending: data.view.pending }))
   }
 
   function renderTree() {
@@ -321,7 +330,7 @@
     const v = data.view
     const top = `<div class="treebar">
       ${data.character ? `<span class="who">${esc(data.character)}</span>` : ''}
-      <select id="treeSpec" aria-label="Tree spec">${data.specs.map((s, i) => `<option value="${i}"${i === data.spec ? ' selected' : ''}>${esc(s.title)} · ${s.points} points</option>`).join('')}</select>
+      <select id="treeSpec" aria-label="Tree spec">${data.specs.map((s, i) => `<option value="${i}"${i === data.spec ? ' selected' : ''}>${esc(specLabel(s))}</option>`).join('')}</select>
       <div class="progress"><div class="bar"><i style="width:${v.total ? 100 * v.done / v.total : 0}%"></i></div><span>${v.done} / ${v.total}</span></div></div>`
     if (v.error) {
       el.innerHTML = `${top}<p class="empty"><b>Can't draw ${esc(v.spec)}.</b><br>${esc(v.error)}<br>Pick another tree spec above, or paste the build again in Build.</p>`
@@ -338,13 +347,18 @@
       const refunds = refunded.length
         ? `<h2>Refund (${refunded.length})</h2><ol>${refunded.map(r => `<li class="refund" data-id="${r.id}"><b>✕</b><span>${esc(r.n)}</span></li>`).join('')}</ol>`
         : ''
+      // the Ascendancy's points, numbered on their own
+      const a = v.asc
+      let m = 0
+      const ascItems = a ? data.asc_points.map(p => `<li class="${p.taken ? 'taken' : 'next'}" data-id="${p.id}"><b>${p.taken ? '✓' : ++m}</b><span>${esc(p.name)}</span></li>`).join('') : ''
+      const ascList = a ? `<h2>${esc(a.name)} (${a.done} taken, ${a.total - a.done} to go)</h2><ol>${ascItems}</ol>` : ''
       const notices = (v.pending_note ? `<p class="note pending">${MiniTree.swatch('pending')}<span>Pending refund: ${esc(v.pending_note)}</span></p>` : '')
         + v.notices.map(t => `<p class="note">${esc(t)}</p>`).join('')
       // a tick redraws everything: keep the list where the player scrolled it
       const scrolled = el.querySelector('aside')?.scrollTop ?? 0
       el.innerHTML = `${top}<div class="treebody">
         <div id="stage"><span id="hint">scroll to zoom · drag to move · click a point in the list to find it</span></div>
-        <aside>${notices}${refunds}<h2>Points (${v.done} taken, ${v.total - v.done} to go)</h2><ol>${items}</ol></aside></div>`
+        <aside>${notices}${refunds}<h2>Points (${v.done} taken, ${v.total - v.done} to go)</h2><ol>${items}</ol>${ascList}</aside></div>`
       el.querySelector('aside').scrollTop = scrolled
       drawTree()
       MiniTree.attach($('stage'), cam, drawTree)
@@ -366,7 +380,8 @@
   // hover details: name and stats (a mastery's chosen effect)
   function tip(e) {
     const el = cam.drag ? null : e.target.closest('[data-id]')
-    const node = el && data.view.nodes.find(x => x.id === Number(el.dataset.id))
+    const id = el && Number(el.dataset.id)
+    const node = el && (data.view.nodes.find(x => x.id === id) || data.view.asc?.nodes.find(x => x.id === id))
     const box = $('tip')
     if (!node) { box.style.display = 'none'; return }
     box.innerHTML = `<strong>${esc(node.n.split(' → ')[0])}</strong>${node.d.map(s => `<div>${esc(s)}</div>`).join('')}`
@@ -485,11 +500,17 @@
   // section shows wins over what's saved; without one, it follows the saved build.
   let draft = false
   let order = []
+  let specs = []
   let hasBuild = false
+  const specLabel = s => `${s.title} · ${s.points} points${s.ascendancy ? ` · ${s.ascendancy} ${s.asc_points}` : ''}`
+  // the chosen spec's Ascendancy points, 0 when it has none
+  const ascMax = () => specs[Number($('spec').value)]?.asc_points ?? 0
+  const ascTaken = () => Math.max(0, Math.min(ascMax(), Number($('ascTaken').value) || 0))
   function setDraft(on) { draft = on; $('draftDot').hidden = !on }
 
-  function showSpecs(specs, chosen) {
-    $('spec').innerHTML = specs.map((s, i) => `<option value="${i}">${esc(s.title)} · ${s.points} points</option>`).join('')
+  function showSpecs(list, chosen) {
+    specs = list
+    $('spec').innerHTML = specs.map((s, i) => `<option value="${i}">${esc(specLabel(s))}</option>`).join('')
     $('spec').value = String(chosen)
     $('pick').classList.remove('off')
     $('save').disabled = false
@@ -499,6 +520,10 @@
     order = await invoke('spec_order', { spec: Number($('spec').value) })
     $('taken').max = order.length
     if (Number($('taken').value) > order.length) $('taken').value = order.length
+    const asc = specs[Number($('spec').value)]
+    $('ascRow').hidden = !asc?.ascendancy
+    $('ascTaken').max = ascMax()
+    if (Number($('ascTaken').value) > ascMax()) $('ascTaken').value = ascMax()
     hint()
   }
   function hint() {
@@ -507,6 +532,8 @@
       ? `Nothing yet. First point: <b>${esc(order[0] ?? '—')}</b>`
       : n === order.length ? 'The whole spec is taken'
       : `Up to ${esc(order[n - 1])}. Next: <b>${esc(order[n])}</b>`
+    const asc = specs[Number($('spec').value)]
+    if (asc?.ascendancy) $('ascHint').innerHTML = `of ${asc.asc_points} <b>${esc(asc.ascendancy)}</b> points taken`
   }
   $('build').addEventListener('input', e => { if (e.target.id !== 'currentOnly') setDraft(true) })
 
@@ -516,6 +543,7 @@
       const b = await invoke('load_build', { input: $('input').value })
       $('loaded').textContent = `${b.specs.length} tree specs`
       $('taken').value = 0
+      $('ascTaken').value = 0
       setDraft(true)
       await showSpecs(b.specs, b.active)
     } catch (e) {
@@ -527,11 +555,13 @@
   $('spec').onchange = () => { setDraft(true); loadOrder() }
   $('taken').oninput = () => { setSeed('hand'); hint() }
   $('taken').onfocus = () => setSeed('hand')
+  $('ascTaken').oninput = () => { setSeed('hand'); hint() }
+  $('ascTaken').onfocus = () => setSeed('hand')
 
   const seed = () => document.querySelector('input[name=seed]:checked')?.value ?? 'hand'
   function setSeed(how) {
     document.querySelector(`input[name=seed][value=${how}]`).checked = true
-    $('takenHint').style.opacity = how === 'hand' ? 1 : .45
+    $('takenHint').style.opacity = $('ascHint').style.opacity = how === 'hand' ? 1 : .45
   }
   document.querySelectorAll('input[name=seed]').forEach(r => r.onchange = () => setSeed(r.value))
   let chars = []
@@ -589,6 +619,7 @@
         account: $('account').value,
         character: $('character').value,
         taken: importing ? null : Math.max(0, Math.min(order.length, Number($('taken').value) || 0)),
+        ascTaken: importing ? null : ascTaken(),
       })
       setDraft(false)
       show('tree')
@@ -626,6 +657,7 @@
     }
     $('character').value = s.character
     if (document.activeElement !== $('taken')) $('taken').value = s.taken
+    if (document.activeElement !== $('ascTaken')) $('ascTaken').value = s.asc_taken
     if (hasBuild) {
       $('loaded').textContent = `${s.specs.length} tree specs · shown on tree ${s.tree_version}`
       await showSpecs(s.specs, s.spec)
