@@ -1,0 +1,558 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>POE Tracker</title>
+<style>
+  /* Main window: the one app window away from the game, in sections (Tree, Build, Settings). */
+  :root {
+    color-scheme: dark;
+    /* Path of Exile's palette: near-black panels, bronze frame, gold for taken points,
+       Magic-item blue for what's next, red for refunds */
+    --scene: #0b0a08; --scene2: #1a1712; --ink: #e0d6c3; --dim: #aa9e82; --faint: #4a4135;
+    --alloc: #d9b45a; --next: #8888ff; --plan: #8a8072; --other: #2a251e; --refund: #e04a3f;
+    --card: #141210; --edge: #3b3328;
+    --display: "Cinzel", "Trajan Pro", Georgia, serif;
+    --body: -apple-system, "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--scene); color: var(--ink); font: 13px/1.5 var(--body); }
+  ::selection { background: rgba(217, 180, 90, .35); color: var(--ink); }
+  body { display: grid; grid-template-columns: 188px 1fr; }
+
+  /* sidebar: the sections, then the app's version and any update waiting */
+  nav { display: flex; flex-direction: column; gap: 2px; padding: 16px 10px 12px; background: var(--card); border-right: 1px solid var(--edge); }
+  nav .brand { margin: 0 8px 14px; font: 600 14px var(--display); letter-spacing: .06em; color: var(--alloc); }
+  nav button.go {
+    display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 7px 10px;
+    background: none; border: 0; border-radius: 6px; color: var(--dim); font: 500 13px var(--body); text-align: left; cursor: pointer;
+  }
+  nav button.go:hover { background: var(--scene2); color: var(--ink); }
+  nav button.go[aria-current="page"] { background: var(--scene2); color: var(--alloc); }
+  nav button.go:focus-visible { outline: 2px solid var(--alloc); outline-offset: -2px; }
+  /* a Build draft not saved yet */
+  nav .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--next); }
+  nav .dot[hidden] { display: none; }
+  nav footer { margin-top: auto; padding: 0 8px; display: flex; flex-direction: column; gap: 8px; font: 500 11px var(--mono); color: var(--plan); }
+  nav footer button { font-size: 12px; padding: 6px 10px; }
+
+  #content { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100vh; }
+  /* problems that touch the whole app, each with a way to fix it */
+  #banners:empty { display: none; }
+  #banners { display: flex; flex-direction: column; gap: 6px; padding: 10px 16px 0; }
+  .banner { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 6px; font-size: 12.5px;
+    color: var(--ink); background: rgba(224, 74, 63, .12); border: 1px solid rgba(224, 74, 63, .45); }
+  .banner svg { flex: none; width: 14px; height: 14px; }
+  .banner span { flex: 1; }
+  .banner button { flex: none; padding: 5px 12px; font-size: 12px; }
+  section.view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  section.view[hidden] { display: none; }
+
+  /* Tree */
+  .treebar { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--edge); }
+  .treebar .who { color: var(--dim); white-space: nowrap; }
+  .progress { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 120px; }
+  .bar { flex: 1; height: 5px; background: var(--faint); border-radius: 3px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--alloc); }
+  .progress span { font: 500 12px var(--mono); color: var(--dim); white-space: nowrap; }
+  .treebody { flex: 1; display: flex; min-height: 0; }
+  #stage { flex: 1; position: relative; min-width: 0; }
+  #stage svg { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+  svg.zoomed { cursor: grab; }
+  svg.dragging { cursor: grabbing; }
+  #hint { position: absolute; left: 12px; bottom: 10px; color: var(--plan); font-size: 12px; pointer-events: none; }
+  aside { width: 320px; border-left: 1px solid var(--edge); background: var(--card); overflow-y: auto; padding: 12px 14px; }
+  aside h2 { font: 600 11px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 14px 0 6px; }
+  aside h2:first-child { margin-top: 0; }
+  ol { list-style: none; margin: 0; padding: 0; }
+  li { display: flex; gap: 8px; align-items: baseline; padding: 3px 4px; border-radius: 4px; cursor: pointer; }
+  li:hover { background: var(--scene2); }
+  li b { font: 500 11px var(--mono); min-width: 22px; text-align: right; }
+  li.taken, li.taken b { color: var(--alloc); }
+  li.next { color: var(--next); font-weight: 600; }
+  li.later { color: var(--dim); }
+  .refund { color: var(--refund); }
+  .note { color: var(--dim); font-size: 12px; margin: 4px 0; }
+  .note.pending { display: flex; gap: 6px; align-items: flex-start; }
+  .note.pending svg { width: 14px; height: 14px; flex: none; margin-top: 1px; }
+  .empty { margin: auto; max-width: 420px; padding: 24px; color: var(--dim); font-size: 14px; text-align: center; }
+  .empty b { color: var(--alloc); }
+  .empty button { margin-top: 12px; }
+  #tip {
+    position: fixed; pointer-events: none; max-width: 300px; padding: 8px 10px; border-radius: 6px;
+    background: rgba(11, 10, 8, .96); border: 1px solid #6e5a3a; font-size: 12px; display: none; z-index: 2;
+  }
+  #tip strong { display: block; color: var(--alloc); margin-bottom: 4px; }
+
+  /* Build and Settings: forms in a readable column */
+  .form { flex: 1; overflow-y: auto; padding: 22px 24px 32px; }
+  .form > div { max-width: 580px; margin: 0 auto; }
+  .form h1 { margin: 0 0 16px; font: 600 16px var(--display); letter-spacing: .05em; color: var(--alloc); }
+  fieldset { background: var(--card); border: 1px solid var(--edge); border-radius: 8px; padding: 14px; margin: 0 0 12px; min-width: 0; }
+  fieldset.off { opacity: .45; pointer-events: none; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  label small { font-weight: 400; color: var(--dim); }
+  .gap { margin-top: 14px; }
+  textarea, input, select {
+    width: 100%; background: var(--scene); color: var(--ink); border: 1px solid var(--faint);
+    border-radius: 6px; padding: 8px; font: 12.5px var(--body);
+  }
+  .treebar select { width: auto; max-width: 340px; padding: 6px 8px; font-size: 13px; }
+  textarea { height: 64px; resize: vertical; font-family: var(--mono); font-size: 11.5px; }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--alloc); outline-offset: -1px; }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .row input[type=number] { width: 90px; }
+  .row input:not([type=number]) { flex: 1; }
+  .opt { display: flex; gap: 8px; align-items: center; font-weight: 400; margin: 8px 0 0; cursor: pointer; }
+  .opt input { width: auto; margin: 0; accent-color: var(--alloc); }
+  .indent { margin-left: 22px; }
+  .hint { color: var(--dim); font-size: 12px; margin: 6px 0 0; }
+  .hint b { color: var(--next); font-weight: 600; }
+  button {
+    background: var(--alloc); color: var(--scene); border: 0; border-radius: 6px; padding: 8px 16px;
+    font: 600 13px var(--body); cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  button.ghost { background: transparent; color: var(--alloc); border: 1px solid var(--alloc); }
+  .path { flex: 1; word-break: break-all; font-family: var(--mono); font-size: 11px; margin: 0; }
+  .path.missing { color: var(--refund); font-family: var(--body); font-size: 12px; }
+  .err { color: var(--refund); min-height: 1.5em; margin: 4px 0 0; }
+  .binds { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; margin-top: 8px; }
+  .binds button { min-width: 130px; font-family: var(--mono); font-size: 12px; padding: 6px 10px; }
+  .binds button.rec { background: var(--next); color: var(--scene); border-color: var(--next); }
+  .actions { display: flex; justify-content: flex-end; gap: 8px; align-items: center; }
+  .actions .err { flex: 1; margin: 0; }
+  .saved { color: var(--plan); font-size: 12px; }
+</style>
+</head>
+<body>
+<nav>
+  <p class="brand">POE Tracker</p>
+  <button class="go" data-go="tree">Tree</button>
+  <button class="go" data-go="build">Build <i class="dot" id="draftDot" hidden title="Not saved"></i></button>
+  <button class="go" data-go="settings">Settings</button>
+  <footer><span id="version"></span><button id="update" hidden></button></footer>
+</nav>
+
+<div id="content">
+  <div id="banners"></div>
+
+  <section class="view" id="tree" hidden><p class="empty">Loading…</p></section>
+
+  <section class="view" id="build" hidden>
+    <div class="form"><div>
+      <h1>Build</h1>
+      <fieldset>
+        <label for="input">Path of Building build <small>(export code, pobb.in or pastebin link)</small></label>
+        <textarea id="input" spellcheck="false" placeholder="https://pobb.in/… or eNrtvW…"></textarea>
+        <div class="row"><button class="ghost" id="load">Load build</button><span class="hint" id="loaded" style="margin:0"></span></div>
+        <p class="err" id="loadErr"></p>
+      </fieldset>
+      <fieldset id="pick" class="off">
+        <label for="spec">Tree spec</label>
+        <select id="spec"></select>
+        <label for="account" class="gap">pathofexile.com account <small>(Name#1234, to import your taken points)</small></label>
+        <div class="row"><input id="account" spellcheck="false" autocomplete="off" placeholder="Name#1234"><button class="ghost" id="find">Find characters</button></div>
+        <div class="row"><p class="hint" id="found" style="flex:1;margin:0"></p><label class="opt" style="margin:0"><input type="checkbox" id="currentOnly" checked> Current league only</label></div>
+        <label for="character" class="gap">Character name <small>(the character this build is for)</small></label>
+        <div class="row" style="margin-top:0">
+          <input id="character" spellcheck="false" autocomplete="off">
+          <select id="charPick" hidden style="flex:1"></select>
+          <button class="ghost" id="resync" hidden title="Import the Character's taken points from pathofexile.com again">Re-sync character</button>
+        </div>
+        <label class="gap">Points already taken</label>
+        <label class="opt"><input type="radio" name="seed" value="import"> Import from pathofexile.com <small class="hint" style="margin:0">(your Characters tab must be public)</small></label>
+        <label class="opt"><input type="radio" name="seed" value="hand"> Set by hand</label>
+        <div class="row indent"><input type="number" id="taken" min="0" value="0"><span class="hint" id="takenHint" style="margin:0"></span></div>
+      </fieldset>
+      <div class="actions"><p class="err" id="saveErr"></p><button id="save" disabled>Save</button></div>
+    </div></div>
+  </section>
+
+  <section class="view" id="settings" hidden>
+    <div class="form"><div>
+      <h1>Settings</h1>
+      <fieldset>
+        <label for="points">Next points <small>(how many the Corner panel numbers)</small></label>
+        <div class="row"><input type="number" id="points" min="1" max="15" value="5"><span class="saved" id="pointsSaved"></span></div>
+        <label class="gap">Game log <small>(Client.txt, read only, so points tick off as you take them)</small></label>
+        <div class="row"><span class="hint path" id="logPath">Looking…</span><button class="ghost" id="chooseLog">Choose…</button></div>
+        <p class="err" id="logErr"></p>
+      </fieldset>
+      <fieldset>
+        <label>Key binds <small>(click one, then press the new keys)</small></label>
+        <div class="binds" id="binds"></div>
+        <p class="hint" id="bindHint"></p>
+        <div class="row"><button class="ghost" id="resetBinds">Reset to defaults</button><p class="err" id="bindErr" style="flex:1;margin:0"></p></div>
+      </fieldset>
+    </div></div>
+  </section>
+</div>
+<div id="tip"></div>
+
+<script src="minitree.js"></script>
+<script src="keys.js"></script>
+<script>
+  const { invoke } = window.__TAURI__.core
+  const { listen } = window.__TAURI__.event
+  const esc = MiniTree.esc
+  const $ = id => document.getElementById(id)
+  const remember = (k, v) => { try { localStorage.setItem(k, v) } catch {} }
+  const recall = k => { try { return localStorage.getItem(k) } catch { return null } }
+
+  let data = null        // the Tree section's view (build_view), null with no build
+  let permission = ''
+  let binds = null
+
+  // ---- sections ----
+  const names = { tree: 'Tree', build: 'Build', settings: 'Settings' }
+  let current = null
+  function show(name) {
+    if (!names[name]) return
+    current = name
+    for (const id of Object.keys(names)) $(id).hidden = id !== name
+    document.querySelectorAll('nav button.go').forEach(b => b.dataset.go === name ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'))
+    document.title = `POE Tracker · ${names[name]}`
+    remember('section', name)
+    if (name === 'tree') drawTree()
+  }
+  document.querySelectorAll('nav button.go').forEach(b => b.onclick = () => show(b.dataset.go))
+  // the tray opens a given section; without one, Build until a build is saved, then the last used
+  listen('section', e => show(e.payload))
+
+  // ---- banners ----
+  const icon = {
+    pause: '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="2" width="2.5" height="8" rx=".5" fill="var(--refund)"/><rect x="7" y="2" width="2.5" height="8" rx=".5" fill="var(--refund)"/></svg>',
+    warn: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.2 11 10.4H1z" fill="none" stroke="var(--refund)" stroke-width="1.3" stroke-linejoin="round"/><path d="M6 4.6v2.8" stroke="var(--refund)" stroke-width="1.3" stroke-linecap="round"/><circle cx="6" cy="8.9" r=".7" fill="var(--refund)"/></svg>',
+  }
+  function banners() {
+    const out = []
+    if (permission.includes('NOT')) {
+      const key = binds ? KeyLabel.format(binds.toggle) : 'the Panel hotkey'
+      out.push(`<div class="banner">${icon.warn}<span>Input Monitoring is off, so ${esc(key)} can't show the panel. Allow POE Tracker there, then reopen the app.</span><button class="ghost" data-fix="permission">Open System Settings</button></div>`)
+    }
+    const v = data?.view
+    if (v?.stopped) {
+      const fix = v.stopped_fix === 'resync' ? '<button class="ghost" data-fix="resync">Re-sync character</button>'
+        : v.stopped_fix === 'log' ? '<button class="ghost" data-fix="log">Choose Client.txt</button>' : ''
+      out.push(`<div class="banner">${icon.pause}<span>${esc(v.stopped)}</span>${fix}</div>`)
+    }
+    $('banners').innerHTML = out.join('')
+  }
+  $('banners').onclick = e => {
+    const fix = e.target.closest('[data-fix]')?.dataset.fix
+    if (fix === 'permission') invoke('open_input_monitoring')
+    if (fix === 'resync') invoke('resync_character')
+    if (fix === 'log') { show('settings'); $('chooseLog').click() }
+  }
+
+  // ---- Tree ----
+  const cam = MiniTree.camera(1)
+  function drawTree() {
+    const stage = $('stage')
+    if (!stage || !data || current !== 'tree') return
+    const w = Math.max(1, stage.clientWidth), h = Math.max(1, stage.clientHeight)
+    stage.querySelector('svg')?.remove()
+    stage.insertAdjacentHTML('afterbegin', MiniTree.draw(data.view, w, h / w, cam))
+  }
+
+  function renderTree() {
+    const el = $('tree')
+    if (!data) {
+      el.innerHTML = '<p class="empty"><b>No build yet.</b><br>Paste your Path of Building build in the Build section.<br><button data-go="build">Go to Build</button></p>'
+      return
+    }
+    const v = data.view
+    const top = `<div class="treebar">
+      ${data.character ? `<span class="who">${esc(data.character)}</span>` : ''}
+      <select id="treeSpec" aria-label="Tree spec">${data.specs.map((s, i) => `<option value="${i}"${i === data.spec ? ' selected' : ''}>${esc(s.title)} · ${s.points} points</option>`).join('')}</select>
+      <div class="progress"><div class="bar"><i style="width:${v.total ? 100 * v.done / v.total : 0}%"></i></div><span>${v.done} / ${v.total}</span></div></div>`
+    if (v.error) {
+      el.innerHTML = `${top}<p class="empty"><b>Can't draw ${esc(v.spec)}.</b><br>${esc(v.error)}<br>Pick another tree spec above, or paste the build again in Build.</p>`
+    } else if (!v.total) {
+      el.innerHTML = `${top}<p class="empty"><b>${esc(v.spec)} has no points to show.</b><br>Pick another tree spec above.</p>`
+    } else {
+      let n = 0
+      const items = data.points.map(p => {
+        const kind = p.taken ? 'taken' : (++n <= v.next.length ? 'next' : 'later')
+        return `<li class="${kind}" data-id="${p.id}"><b>${p.taken ? '✓' : n}</b><span>${esc(p.name)}</span></li>`
+      }).join('')
+      // the Refunds as drawn on the tree, so clicking one finds it like any point
+      const refunded = v.nodes.filter(x => x.s === 'refund').sort((a, b) => a.n.localeCompare(b.n))
+      const refunds = refunded.length
+        ? `<h2>Refund (${refunded.length})</h2><ol>${refunded.map(r => `<li class="refund" data-id="${r.id}"><b>✕</b><span>${esc(r.n)}</span></li>`).join('')}</ol>`
+        : ''
+      const notices = (v.pending_note ? `<p class="note pending">${MiniTree.swatch('pending')}<span>Pending refund: ${esc(v.pending_note)}</span></p>` : '')
+        + v.notices.map(t => `<p class="note">${esc(t)}</p>`).join('')
+      // a tick redraws everything: keep the list where the player scrolled it
+      const scrolled = el.querySelector('aside')?.scrollTop ?? 0
+      el.innerHTML = `${top}<div class="treebody">
+        <div id="stage"><span id="hint">scroll to zoom · drag to move · click a point in the list to find it</span></div>
+        <aside>${notices}${refunds}<h2>Points (${v.done} taken, ${v.total - v.done} to go)</h2><ol>${items}</ol></aside></div>`
+      el.querySelector('aside').scrollTop = scrolled
+      drawTree()
+      MiniTree.attach($('stage'), cam, drawTree)
+      el.querySelector('aside').onclick = e => {
+        const li = e.target.closest('li[data-id]')
+        const node = li && v.nodes.find(x => x.id === Number(li.dataset.id))
+        if (!node) return
+        cam.zoom = Math.max(cam.zoom, 3); cam.center = [node.x, node.y]
+        drawTree()
+      }
+      $('stage').addEventListener('mousemove', tip)
+      $('stage').addEventListener('mouseleave', () => { $('tip').style.display = 'none' })
+    }
+    // the everyday switch: a spec picked here is the current one straight away
+    $('treeSpec').onchange = () => { cam.zoom = 1; cam.center = null; invoke('set_spec', { spec: Number($('treeSpec').value) }) }
+  }
+  $('tree').addEventListener('click', e => { const go = e.target.closest('[data-go]'); if (go) show(go.dataset.go) })
+
+  // hover details: name and stats (a mastery's chosen effect)
+  function tip(e) {
+    const el = cam.drag ? null : e.target.closest('[data-id]')
+    const node = el && data.view.nodes.find(x => x.id === Number(el.dataset.id))
+    const box = $('tip')
+    if (!node) { box.style.display = 'none'; return }
+    box.innerHTML = `<strong>${esc(node.n.split(' → ')[0])}</strong>${node.d.map(s => `<div>${esc(s)}</div>`).join('')}`
+    box.style.display = 'block'
+    const x = Math.min(e.clientX + 14, innerWidth - box.offsetWidth - 8), y = Math.min(e.clientY + 14, innerHeight - box.offsetHeight - 8)
+    box.style.left = `${x}px`; box.style.top = `${y}px`
+  }
+  new ResizeObserver(drawTree).observe(document.body)
+
+  // ---- Build ----
+  // a draft: anything changed here and not saved yet. While there is one, what the
+  // section shows wins over what's saved; without one, it follows the saved build.
+  let draft = false
+  let order = []
+  let hasBuild = false
+  function setDraft(on) { draft = on; $('draftDot').hidden = !on }
+
+  function showSpecs(specs, chosen) {
+    $('spec').innerHTML = specs.map((s, i) => `<option value="${i}">${esc(s.title)} · ${s.points} points</option>`).join('')
+    $('spec').value = String(chosen)
+    $('pick').classList.remove('off')
+    $('save').disabled = false
+    return loadOrder()
+  }
+  async function loadOrder() {
+    order = await invoke('spec_order', { spec: Number($('spec').value) })
+    $('taken').max = order.length
+    if (Number($('taken').value) > order.length) $('taken').value = order.length
+    hint()
+  }
+  function hint() {
+    const n = Math.max(0, Math.min(order.length, Number($('taken').value) || 0))
+    $('takenHint').innerHTML = n === 0
+      ? `Nothing yet. First point: <b>${esc(order[0] ?? '—')}</b>`
+      : n === order.length ? 'The whole spec is taken'
+      : `Up to ${esc(order[n - 1])}. Next: <b>${esc(order[n])}</b>`
+  }
+  $('build').addEventListener('input', e => { if (e.target.id !== 'currentOnly') setDraft(true) })
+
+  $('load').onclick = async () => {
+    $('loadErr').textContent = ''; $('loaded').textContent = 'Loading…'; $('load').disabled = true
+    try {
+      const b = await invoke('load_build', { input: $('input').value })
+      $('loaded').textContent = `${b.specs.length} tree specs`
+      $('taken').value = 0
+      setDraft(true)
+      await showSpecs(b.specs, b.active)
+    } catch (e) {
+      $('loaded').textContent = ''; $('loadErr').textContent = e
+    } finally {
+      $('load').disabled = false
+    }
+  }
+  $('spec').onchange = () => { setDraft(true); loadOrder() }
+  $('taken').oninput = () => { setSeed('hand'); hint() }
+  $('taken').onfocus = () => setSeed('hand')
+
+  const seed = () => document.querySelector('input[name=seed]:checked')?.value ?? 'hand'
+  function setSeed(how) {
+    document.querySelector(`input[name=seed][value=${how}]`).checked = true
+    $('takenHint').style.opacity = how === 'hand' ? 1 : .45
+  }
+  document.querySelectorAll('input[name=seed]').forEach(r => r.onchange = () => setSeed(r.value))
+  let chars = []
+  $('account').oninput = () => {
+    if ($('account').value.trim()) setSeed('import')
+    // another account's characters aren't this one's: back to typing a name
+    if (chars.length) {
+      chars = []
+      $('charPick').hidden = true; $('character').hidden = false; $('found').textContent = ''
+    }
+  }
+  $('account').onkeydown = e => { if (e.key === 'Enter') $('find').click() }
+
+  $('charPick').onchange = () => { $('character').value = $('charPick').value; setDraft(true) }
+  function showChars() {
+    const current = chars.filter(c => c.current)
+    const shown = $('currentOnly').checked ? current : chars
+    const typed = $('character').value.trim()
+    const list = typed && !shown.some(c => c.name === typed) ? [{ name: typed, other: true }, ...shown] : shown
+    $('charPick').innerHTML = list.map(c => `<option value="${esc(c.name)}">${esc(c.name)}${c.other ? '' : ` · ${esc(c.class)} ${c.level} · ${esc(c.league)}`}</option>`).join('')
+    if (!typed && shown.length) $('character').value = shown[0].name
+    $('charPick').value = $('character').value
+    $('charPick').hidden = !list.length; $('character').hidden = !!list.length
+    const leagues = [...new Set(current.map(c => c.league))].join(', ')
+    $('found').textContent = $('currentOnly').checked
+      ? `${shown.length} in ${leagues || 'the current league'}, ${chars.length} in all`
+      : `${shown.length} characters`
+    $('found').style.color = ''
+  }
+  $('currentOnly').onchange = () => { remember('currentOnly', $('currentOnly').checked); if (chars.length) showChars() }
+  $('currentOnly').checked = recall('currentOnly') !== 'false'
+
+  $('find').onclick = async () => {
+    if (!$('account').value.trim()) { $('found').textContent = 'Type your account name first, like Name#1234.'; $('found').style.color = 'var(--refund)'; return }
+    $('found').textContent = 'Looking…'; $('find').disabled = true
+    try {
+      chars = await invoke('find_characters', { account: $('account').value })
+      showChars()
+    } catch (e) {
+      $('found').textContent = e; $('found').style.color = 'var(--refund)'
+    } finally {
+      $('find').disabled = false
+    }
+  }
+
+  $('save').onclick = async () => {
+    $('saveErr').textContent = ''
+    if (!$('character').value.trim()) { $('saveErr').textContent = 'Type your character name.'; return }
+    const importing = seed() === 'import'
+    if (importing && !$('account').value.trim()) { $('saveErr').textContent = 'Type your account name, or set the points by hand.'; return }
+    $('save').disabled = true; $('save').textContent = importing ? 'Importing…' : 'Save'
+    try {
+      await invoke('save_setup', {
+        spec: Number($('spec').value),
+        account: $('account').value,
+        character: $('character').value,
+        taken: importing ? null : Math.max(0, Math.min(order.length, Number($('taken').value) || 0)),
+      })
+      setDraft(false)
+      show('tree')
+    } catch (e) {
+      $('saveErr').textContent = importing && !String(e).includes('by hand') ? `${e} Or set the points by hand.` : e
+    } finally {
+      $('save').disabled = false; $('save').textContent = 'Save'
+    }
+  }
+  $('resync').onclick = () => { $('saveErr').textContent = ''; invoke('resync_character') }
+  listen('resync_error', e => { setSeed('import'); $('saveErr').textContent = e.payload; show('build') })
+
+  // the saved build as it stands, into the Build section (unless there's a draft) and Settings
+  async function loadSetup(first) {
+    const s = await invoke('current_setup')
+    hasBuild = s.specs.length > 0
+    showLog(s.log_path)
+    if (document.activeElement !== $('points')) $('points').value = s.points
+    $('resync').hidden = !hasBuild || !s.account
+    if (draft) return
+    if (first) {
+      $('input').value = s.input
+      $('account').value = s.account
+      setSeed(s.account ? 'import' : 'hand')
+    }
+    $('character').value = s.character
+    if (document.activeElement !== $('taken')) $('taken').value = s.taken
+    if (hasBuild) {
+      $('loaded').textContent = `${s.specs.length} tree specs · shown on tree ${s.tree_version}`
+      await showSpecs(s.specs, s.spec)
+    }
+  }
+
+  // ---- Settings: each change saves straight away ----
+  let pointsTimer = 0
+  $('points').oninput = () => {
+    clearTimeout(pointsTimer)
+    pointsTimer = setTimeout(async () => {
+      const n = Number($('points').value)
+      if (!n) return
+      try {
+        $('points').value = await invoke('set_points', { points: n })
+        $('pointsSaved').textContent = 'Saved'
+        setTimeout(() => { $('pointsSaved').textContent = '' }, 1500)
+      } catch (e) { $('pointsSaved').textContent = String(e) }
+    }, 400)
+  }
+  function showLog(path) {
+    $('logPath').textContent = path ?? 'Client.txt not found. Choose it from your Path of Exile folder (logs/Client.txt).'
+    $('logPath').classList.toggle('missing', !path)
+  }
+  $('chooseLog').onclick = async () => {
+    $('logErr').textContent = ''
+    try { const p = await invoke('choose_log'); if (p) showLog(p) } catch (e) { $('logErr').textContent = e }
+  }
+
+  // Key binds: saved and listened for as soon as they're recorded
+  const actions = [
+    ['toggle', 'Show / hide the Corner panel'], ['hide', 'Hide the panel'],
+    ['zoom_in', 'Zoom in'], ['zoom_out', 'Zoom out'], ['zoom_whole', 'Zoom to the whole spec'],
+    ['pan_left', 'Move view left'], ['pan_right', 'Move view right'], ['pan_up', 'Move view up'], ['pan_down', 'Move view down'],
+  ]
+  let recording = null
+  function showBinds() {
+    $('binds').innerHTML = actions.map(([id, label]) =>
+      `<span>${label}</span><button class="ghost${recording === id ? ' rec' : ''}" data-bind="${id}">${recording === id ? 'Press keys…' : esc(KeyLabel.format(binds[id]))}</button>`).join('')
+    const bare = actions.filter(([id]) => id !== 'hide' && !['alt', 'ctrl', 'shift', 'meta'].some(m => binds[id][m]))
+    $('bindHint').textContent = bare.length
+      ? `While Path of Exile is in front these keys go to the app, not the game. ${bare.map(([, l]) => l).join(', ')} has no modifier, so the game loses that key then.`
+      : 'While Path of Exile is in front these keys go to the app, not the game (Esc still reaches the game).'
+    banners()
+  }
+  $('binds').onclick = e => {
+    const id = e.target.dataset?.bind
+    if (!id) return
+    recording = recording === id ? null : id
+    $('bindErr').textContent = ''
+    showBinds()
+  }
+  window.addEventListener('keydown', async e => {
+    if (!recording || current !== 'settings') return
+    e.preventDefault(); e.stopPropagation()
+    if (/^(Shift|Control|Alt|Meta|OS)/.test(e.code) || !e.code) return
+    const next = { ...binds, [recording]: { code: e.code, alt: e.altKey, ctrl: e.ctrlKey, shift: e.shiftKey, meta: e.metaKey } }
+    recording = null
+    try { binds = await invoke('set_binds', { binds: next }) } catch (err) { $('bindErr').textContent = err }
+    showBinds()
+  }, true)
+  $('resetBinds').onclick = async () => {
+    recording = null; $('bindErr').textContent = ''
+    try { binds = await invoke('set_binds', { binds: null }) } catch (err) { $('bindErr').textContent = err }
+    showBinds()
+  }
+
+  // ---- version and updates ----
+  let version = ''
+  function showUpdate(next) {
+    if (!next) return
+    $('version').textContent = `v${version} → v${next} ready`
+    $('update').textContent = 'Restart to update'
+    $('update').hidden = false
+  }
+  $('update').onclick = () => invoke('restart_to_update')
+  listen('update_ready', e => showUpdate(e.payload))
+
+  // ---- load ----
+  const loadTree = () => invoke('build_view').then(d => { data = d; renderTree(); banners() })
+  // any change to the plan (a tick, a re-sync, a new spec, new settings) reloads what shows it
+  listen('plan', () => { loadTree(); loadSetup(false) })
+  listen('binds', e => { binds = e.payload; showBinds() })
+  listen('status', e => { if (e.payload.permission !== permission) { permission = e.payload.permission; banners() } })
+
+  Promise.all([
+    invoke('key_binds').then(b => { binds = b; showBinds() }),
+    invoke('initial_status').then(s => { permission = s.permission }),
+    invoke('app_info').then(i => { version = i.version; $('version').textContent = `v${version}`; showUpdate(i.update) }),
+    loadTree(),
+    loadSetup(true),
+  ]).finally(() => {
+    banners()
+    if (!current) show(hasBuild ? (recall('section') || 'tree') : 'build')
+  })
+</script>
+</body>
+</html>

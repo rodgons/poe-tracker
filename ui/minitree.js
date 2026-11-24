@@ -1,5 +1,5 @@
 // The Mini-tree: draws a panel view as SVG and lets the mouse zoom and move it.
-// Shared by the Corner panel and the Build window; colours come from the page's CSS variables.
+// Shared by the Corner panel and the Main window's Tree section; colours come from the page's CSS variables.
 const MiniTree = (() => {
   const R = { small: 46, notable: 78, keystone: 110, mastery: 64, jewel: 70, start: 120 }
   const col = { alloc: 'var(--alloc)', refund: 'var(--refund)', next: 'var(--next)', plan: 'var(--plan)', other: 'var(--other)' }
@@ -34,6 +34,8 @@ const MiniTree = (() => {
   function draw(v, width, ratio, cam) {
     const by = Object.fromEntries(v.nodes.map(n => [n.id, n]))
     const mine = v.nodes.filter(n => n.s !== 'other'), pad = 160
+    // nothing to frame (an empty spec): an empty stage, not a NaN viewBox
+    if (!mine.length) return `<svg viewBox="0 0 ${width} ${Math.round(width * ratio)}" xmlns="http://www.w3.org/2000/svg"></svg>`
     let x0 = Math.min(...mine.map(n => n.x)) - pad, y0 = Math.min(...mine.map(n => n.y)) - pad
     let w = Math.max(...mine.map(n => n.x)) - x0 + pad, h = Math.max(...mine.map(n => n.y)) - y0 + pad
     if (h < w * ratio) { y0 -= (w * ratio - h) / 2; h = w * ratio } else { x0 -= (h / ratio - w) / 2; w = h / ratio }

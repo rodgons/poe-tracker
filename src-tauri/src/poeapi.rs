@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 const SITE: &str = "https://www.pathofexile.com/character-window";
-/// a stalled answer gives up instead of leaving the Setup window on "Importing…"
+/// a stalled answer gives up instead of leaving the Build section on "Importing…"
 pub const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 const USER_AGENT: &str = concat!("poe-tracker/", env!("CARGO_PKG_VERSION"), " (github.com/rodgons/poe-tracker)");
 
