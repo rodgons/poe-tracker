@@ -108,6 +108,9 @@ pub struct OwnedGem {
     pub slot: String,
     /// gems with the same number are linked: the item's position and its socket's group
     pub link: u32,
+    /// the gem's picture on GGG's image server, as the items import gives it
+    #[serde(default)]
+    pub icon: String,
 }
 
 pub fn items(account: &str, character: &str) -> Result<Vec<OwnedGem>, String> {
@@ -157,6 +160,8 @@ fn parse_items(body: &str) -> Result<Vec<OwnedGem>, String> {
         properties: Vec<Property>,
         #[serde(default)]
         hybrid: Option<Hybrid>,
+        #[serde(default)]
+        icon: String,
     }
     #[derive(Deserialize)]
     struct Property {
@@ -196,6 +201,7 @@ fn parse_items(body: &str) -> Result<Vec<OwnedGem>, String> {
                 quality: number(&g.properties, "Quality"),
                 slot: item.slot.clone(),
                 link: (i as u32) * 1000 + group,
+                icon: g.icon.clone(),
             });
         }
     }
@@ -265,7 +271,7 @@ mod tests {
                "properties":[{"name":"Duration, Support","values":[]},{"name":"Level","values":[["20 (Max)",0]]},{"name":"Quality","values":[["+23%",1]]}]},
               {"socket":1,"support":false,"typeLine":"Vaal Molten Shell","baseType":"Vaal Molten Shell",
                "properties":[{"name":"Level","values":[["21 (Max)",0]]}],"hybrid":{"isVaalGem":true,"baseTypeName":"Molten Shell"}},
-              {"socket":2,"support":false,"typeLine":"Herald of Ash","properties":[{"name":"Level","values":[["7",0]]}]}]},
+              {"socket":2,"support":false,"typeLine":"Herald of Ash","icon":"https://web.poecdn.com/gen/image/x/HeraldOfAsh.png","properties":[{"name":"Level","values":[["7",0]]}]}]},
             {"inventoryId":"Belt","sockets":[{"group":0}],"socketedItems":[{"socket":0,"abyssJewel":true,"typeLine":"Murderous Eye Jewel"}]},
             {"inventoryId":"Weapon2","sockets":[{"group":0}],"socketedItems":[{"socket":0,"support":false,"typeLine":"Dash"}]}],
             "character":{"name":"x"}}"#;
@@ -277,6 +283,7 @@ mod tests {
         assert_eq!(gems[0].link, gems[1].link);
         assert_ne!(gems[1].link, gems[2].link);
         assert_eq!(gems[2].name, "Herald of Ash");
+        assert_eq!(gems[2].icon, "https://web.poecdn.com/gen/image/x/HeraldOfAsh.png");
     }
 
     #[test]

@@ -22,13 +22,13 @@ Three things together, which a second-screen PoB or a generic overlay can't hone
 
 1. **It tracks itself.** Allocations are read from the game's own Client log, so taken points tick off with no input from the player.
 2. **It lives inside the game.** The Corner panel shows only inside the Path of Exile window, toggled by the Panel hotkey.
-3. **It stays clearly within the game's rules.** It reads the log, the clipboard and its own window only. It never reads game memory, injects code, edits game files or sends input to the game. Its only network requests are the player's own pathofexile.com profile (passives and gear) and a launch-time update check against its GitHub releases.
+3. **It stays clearly within the game's rules.** It reads the log, the clipboard and its own window only. It never reads game memory, injects code, edits game files or sends input to the game. Its only network requests are the player's own pathofexile.com profile (passives and gear), gem pictures from GGG's image server (web.poecdn.com) in the Main window's Gems section, and a launch-time update check against its GitHub releases.
 
 ## Operating Context
 
 - **Main window** (opened on first launch and from the tray / menu bar, which can open it at any section): one ordinary window with a sidebar of sections, and room for more as features arrive.
   - **Tree**: the whole Tree spec large, every point in order, Refunds, hover details and the choice of Tree spec.
-  - **Gems**: the Skill set paired with the Tree spec beside the Character's socketed gems (imported from the public profile), each marked had, missing, unlinked or optional, plus the gems to remove. A picker overrides the paired Skill set.
+  - **Gems**: the Skill set paired with the Tree spec beside the Character's socketed gems (imported from the public profile), each row with the gem's picture, each marked had, missing, unlinked or optional, plus the gems to remove. A picker overrides the paired Skill set.
   - **Build**: paste a PoB code or a pobb.in or pastebin link, pick the Tree spec and Character, and set the Seed (imported from a public profile, or "the first N points"). Saved with an explicit Save; an unsaved draft is kept and marked in the sidebar.
   - **Settings**: Next points (1–15), the Game log path and Key binds, each saved as soon as it changes.
   - Problems that stop the app working show as a banner across every section, each with a button to the fix.
@@ -48,7 +48,7 @@ Three things together, which a second-screen PoB or a generic overlay can't hone
 
 ## Brand Commitments
 
-- Colours follow Path of Exile's own palette (user's direction, 2026-11-23), so the app reads as part of the game's world. This covers colour only: never use GGG's art, textures, logos or other assets.
+- Colours follow Path of Exile's own palette (user's direction, 2026-11-23), so the app reads as part of the game's world. This covers colour only: never use GGG's art, textures, logos or other assets, with one exception the owner approved (2026-11-24): the Gems section shows each gem's own picture, loaded from GGG's image server rather than bundled. The in-game panels stay free of GGG art.
 
 ## Evidence on Hand
 
