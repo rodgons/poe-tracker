@@ -108,6 +108,11 @@
   .grow { display: grid; grid-template-columns: 96px 1fr auto auto; gap: 10px; align-items: baseline; padding: 3px 0; border-top: 1px solid var(--other); }
   .grow:first-of-type { border-top: 0; }
   .grow .gname small { color: var(--plan); }
+  .grow .gname { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  /* the gem's own picture: the socketed gem's from the items import, else from the bundled table */
+  .gicon { flex: none; width: 28px; height: 28px; object-fit: contain; }
+  .gicon.none { visibility: hidden; }
+  .grow.optional .gicon, .grow.missing .gicon { opacity: .6; }
   .grow .lv { font: 500 11.5px var(--mono); color: var(--dim); text-align: right; min-width: 64px; }
   .grow .lv.head { font: 600 10.5px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--plan); }
   .mark { font: 600 12px var(--body); white-space: nowrap; }
@@ -236,6 +241,7 @@
 
 <script src="minitree.js"></script>
 <script src="keys.js"></script>
+<script src="gem-icons.js"></script>
 <script>
   const { invoke } = window.__TAURI__.core
   const { listen } = window.__TAURI__.event
@@ -373,6 +379,15 @@
   }
   const mark = st => `<span class="mark ${st}"><i aria-hidden="true">${marks[st][0]}</i>${marks[st][1]}</span>`
   const lq = (l, q) => l == null ? '—' : `${l}/${q}`
+  // the socketed gem's own picture, else GGG's picture for the gem's name (transfigured gems show their base's)
+  const gemKey = n => n.trim().toLowerCase().replace(/ support$/, '')
+  function gemIcon(name, own) {
+    const art = window.GemIcons?.[gemKey(name)]
+    const src = own || (art ? `https://web.poecdn.com/image/${art}.png` : '')
+    return src
+      ? `<img class="gicon" src="${esc(src)}" alt="" loading="lazy" onerror="this.classList.add('none')">`
+      : '<span class="gicon none"></span>'
+  }
   function ago(secs) {
     const m = Math.floor((Date.now() / 1000 - secs) / 60)
     return m < 1 ? 'just now' : m === 1 ? '1 min ago' : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ago`
@@ -410,9 +425,9 @@
       if (g.heading) { parts.push(`<p class="ghead">${esc(g.title)}</p>`); continue }
       const rows = g.gems.map(r => {
         const st = r.status === 'optional' ? 'optional' : r.status
-        const name = esc(r.name) + (r.have_name ? ` <small>(${esc(r.have_name)})</small>` : '')
+        const name = gemIcon(r.have_name || r.name, r.have_icon) + `<span>${esc(r.name)}${r.have_name ? ` <small>(${esc(r.have_name)})</small>` : ''}</span>`
         const shown = c ? mark(st) + (st === 'optional' && r.socketed ? ' <small class="hint" style="margin:0">socketed</small>' : '') : (r.status === 'optional' ? mark('optional') : '')
-        return `<div class="grow${r.support ? ' support' : ''}${st === 'optional' ? ' optional' : ''}"><span>${shown}</span><span class="gname">${name}</span>
+        return `<div class="grow${r.support ? ' support' : ''}${st === 'optional' ? ' optional' : ''}${c && st === 'missing' ? ' missing' : ''}"><span>${shown}</span><span class="gname">${name}</span>
           <span class="lv">${lq(r.want_level, r.want_quality)}</span><span class="lv">${c ? lq(r.have_level, r.have_quality) : ''}</span></div>`
       }).join('')
       parts.push(`<div class="gcard"><h3><span>${esc(g.title)}</span><small>${esc(g.slot)}</small></h3>
@@ -420,7 +435,7 @@
     }
     if (c && c.remove.length) {
       parts.push(`<div class="gcard remove"><h3><span>Remove</span><small>socketed, not in this Skill set</small></h3>${c.remove.map(x =>
-        `<div class="grow"><span>${mark('remove')}</span><span class="gname">${esc(x.name)} <small>· ${esc(x.slot)}</small></span><span class="lv"></span><span class="lv">${lq(x.level, x.quality)}</span></div>`).join('')}</div>`)
+        `<div class="grow"><span>${mark('remove')}</span><span class="gname">${gemIcon(x.name, x.icon)}<span>${esc(x.name)} <small>· ${esc(x.slot)}</small></span></span><span class="lv"></span><span class="lv">${lq(x.level, x.quality)}</span></div>`).join('')}</div>`)
     }
     const scrolled = el.querySelector('.gemsbody')?.scrollTop ?? 0
     el.innerHTML = `${top}<div class="gemsbody"><div>${parts.join('')}</div></div>`

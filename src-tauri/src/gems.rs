@@ -77,6 +77,8 @@ pub struct GemRow {
     pub have_quality: Option<u32>,
     /// the gem that covers it when its name differs (Vaal or Awakened)
     pub have_name: Option<String>,
+    /// the socketed gem's own picture, when it's socketed
+    pub have_icon: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,6 +94,7 @@ pub struct GroupRow {
 #[derive(Debug, Serialize)]
 pub struct Extra {
     pub name: String,
+    pub icon: String,
     pub level: u32,
     pub quality: u32,
     pub slot: String,
@@ -235,6 +238,7 @@ pub fn compare(set: &SkillSet, owned: &[OwnedGem]) -> Comparison {
                     have_level: have.map(|h| h.level),
                     have_quality: have.map(|h| h.quality),
                     have_name: have.filter(|h| key(&h.name) != key(&gem.name)).map(|h| h.name.clone()),
+                    have_icon: have.map(|h| h.icon.clone()).filter(|i| !i.is_empty()),
                 }
             })
             .collect();
@@ -249,7 +253,7 @@ pub fn compare(set: &SkillSet, owned: &[OwnedGem]) -> Comparison {
         .iter()
         .zip(&taken)
         .filter(|(_, t)| !**t)
-        .map(|(h, _)| Extra { name: h.name.clone(), level: h.level, quality: h.quality, slot: h.slot.clone() })
+        .map(|(h, _)| Extra { name: h.name.clone(), icon: h.icon.clone(), level: h.level, quality: h.quality, slot: h.slot.clone() })
         .collect();
     counts.remove = remove.len();
     Comparison { groups: rows, remove, counts }
@@ -269,6 +273,7 @@ mod tests {
             quality: 0,
             slot: "BodyArmour".into(),
             link,
+            icon: String::new(),
         }
     }
     fn gem(name: &str, support: bool) -> Gem {
