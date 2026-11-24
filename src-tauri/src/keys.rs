@@ -1,4 +1,5 @@
-// The player's key binds (by default the panel hotkey Alt/Option+P, the zoom keys
+// The player's key binds (by default the panel hotkey Alt/Option+P, the Gem panel
+// hotkey Alt/Option+G, the zoom keys
 // Alt/Option + = - 0, panning Alt/Option + arrows and Esc). A listen-only hook observes
 // them; while the game is in front the toggle (and, with the panel shown, zoom and pan)
 // are also registered as OS hot keys, so the game never sees them. The game ignores
@@ -52,6 +53,8 @@ pub struct Binds {
     pub pan_right: Bind,
     pub pan_up: Bind,
     pub pan_down: Bind,
+    /// the Gem panel hotkey
+    pub gem_toggle: Bind,
 }
 
 impl Default for Binds {
@@ -66,12 +69,13 @@ impl Default for Binds {
             pan_right: Bind::alt("ArrowRight"),
             pan_up: Bind::alt("ArrowUp"),
             pan_down: Bind::alt("ArrowDown"),
+            gem_toggle: Bind::alt("KeyG"),
         }
     }
 }
 
 impl Binds {
-    fn all(&self) -> [(&Bind, Msg); 9] {
+    fn all(&self) -> [(&Bind, Msg); 10] {
         [
             (&self.toggle, Msg::Hotkey),
             (&self.hide, Msg::Esc),
@@ -82,6 +86,7 @@ impl Binds {
             (&self.pan_right, Msg::Pan(1, 0)),
             (&self.pan_up, Msg::Pan(0, -1)),
             (&self.pan_down, Msg::Pan(0, 1)),
+            (&self.gem_toggle, Msg::GemHotkey),
         ]
     }
 
@@ -106,8 +111,8 @@ static BINDS: LazyLock<RwLock<Binds>> = LazyLock::new(|| RwLock::new(Binds::defa
 /// leaves those alone so they don't fire twice.
 static GRABBED: AtomicU16 = AtomicU16::new(0);
 
-/// Bits of `Binds::all()`: the toggle, then zoom and pan; hide (Esc) is never taken from the game.
-pub const TOGGLE: u16 = 1;
+/// Bits of `Binds::all()`: the two panel toggles, then zoom and pan; hide (Esc) is never taken from the game.
+pub const TOGGLE: u16 = 1 | 1 << 9;
 pub const VIEW: u16 = 0b1_1111_1100;
 
 /// Swaps the binds the hook listens for; takes effect on the next key press.
@@ -289,12 +294,16 @@ mod tests {
         assert_eq!(shortcut(&b.toggle), Some(Shortcut::new(Some(Modifiers::ALT), Code::KeyP)));
         assert_eq!(shortcut(&b.pan_left), Some(Shortcut::new(Some(Modifiers::ALT), Code::ArrowLeft)));
         assert_eq!(shortcut(&b.zoom_whole), Some(Shortcut::new(Some(Modifiers::ALT), Code::Digit0)));
+        assert_eq!(shortcut(&b.gem_toggle), Some(Shortcut::new(Some(Modifiers::ALT), Code::KeyG)));
     }
 
     #[test]
     fn defaults_pass_and_shared_keys_fail() {
         assert!(Binds::default().check().is_ok());
         let mut b = Binds::default();
+        b.gem_toggle = b.toggle.clone();
+        assert!(b.check().is_err(), "the two panel hotkeys can't share keys");
+        b.gem_toggle = Binds::default().gem_toggle;
         b.hide = b.toggle.clone();
         assert!(b.check().is_err());
         b.hide.code.clear();

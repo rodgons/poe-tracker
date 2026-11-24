@@ -33,6 +33,7 @@ Three things together, which a second-screen PoB or a generic overlay can't hone
   - **Settings**: Next points (1–15), the Game log path and Key binds, each saved as soon as it changes.
   - Problems that stop the app working show as a banner across every section, each with a button to the fix.
 - **Corner panel**: a small, translucent in-game panel, top-right by default. The player zooms and moves its Mini-tree with the mouse. It takes the mouse but never the keyboard.
+- **Gem panel**: a second small, translucent in-game panel (⌥/Alt+G), by default beside the gem level-up icons on the right edge, listing only the missing, unlinked and extra gems. Mouse only, draggable, never shown outside the game.
 - Refunds show as *Refund pending* until the next area change or a Re-sync settles them.
 - Terms are defined in `GLOSSARY.md` and must be used as written there: Build, Tree spec, Skill set, Character, Seed, Next points, Refund, Pending refund, Mini-tree, Corner panel, Main window, Panel hotkey, Client log.
 

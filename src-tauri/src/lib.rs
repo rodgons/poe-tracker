@@ -123,6 +123,10 @@ pub enum Msg {
     Pan(i8, i8),
     /// the tray's Show/Hide panel item
     TogglePanel,
+    /// the Gem panel hotkey
+    GemHotkey,
+    /// the tray's Show/Hide gem panel item
+    ToggleGemPanel,
     /// the frontmost app, and its window frame when it's the game
     Frontmost(String, Option<gamewin::Frame>),
     /// the player saved new key binds
@@ -326,19 +330,37 @@ fn logical_size(win: &WebviewWindow) -> (f64, f64) {
     win.outer_size().map_or((436.0, 520.0), |s| (s.width as f64 / scale, s.height as f64 / scale))
 }
 
-/// Puts the Corner panel inside the game window at the player's spot (top-right by
-/// default), or in the screen corner when the game window can't be found.
+/// The Gem panel's window; the Corner panel's is "corner".
+const GEM_PANEL: &str = "gempanel";
+
+/// The panel window a page names: "gems" is the Gem panel, anything else the Corner panel.
+fn panel_label(which: Option<&str>) -> &'static str {
+    if which == Some("gems") {
+        GEM_PANEL
+    } else {
+        "corner"
+    }
+}
+
+/// Puts a panel inside the game window at the player's spot (the Corner panel top-right,
+/// the Gem panel beside the gem level-up icons by default), or in the screen corner when
+/// the game window can't be found.
 fn position_panel(app: &AppHandle, win: &WebviewWindow) {
+    let gems = win.label() == GEM_PANEL;
     let (frame, spot, dragging) = {
         let st = app.state::<AppState>();
         let st = st.lock().unwrap();
-        (st.frame, st.saved.panel_spot, st.drag_from.is_some())
+        (st.frame, if gems { st.saved.gem_spot } else { st.saved.panel_spot }, st.drag_from.is_some())
     };
     if dragging {
         return;
     }
     let Some(frame) = frame else { return place_in_corner(win) };
-    let (x, y) = placement::place(logical_frame(win, frame), logical_size(win), spot);
+    let (frame, size) = (logical_frame(win, frame), logical_size(win));
+    let (x, y) = match spot {
+        None if gems => placement::beside_gem_icons(frame, size),
+        _ => placement::place(frame, size, spot),
+    };
     let _ = win.set_position(LogicalPosition::new(x, y));
 }
 
@@ -371,6 +393,7 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
     let mut presses = 0;
     // never shown outside the game, so not at launch either: the tray icon says it's running
     let mut visible = false;
+    let mut gems_visible = false;
     let mut frontmost = foreground::frontmost_app();
     let mut key = "none yet";
     for msg in rx {
@@ -382,11 +405,20 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                 key = "panel hotkey";
                 visible = !visible;
             }
-            Msg::Esc if visible => {
+            Msg::Esc if visible || gems_visible => {
                 key = "Esc";
                 visible = false;
+                gems_visible = false;
             }
             Msg::TogglePanel if in_poe || visible => visible = !visible,
+            Msg::GemHotkey | Msg::ToggleGemPanel if in_poe || gems_visible => {
+                key = "gem panel hotkey";
+                gems_visible = !gems_visible;
+                // opening it brings the gems up to date, at most once a minute
+                if gems_visible {
+                    import_gems(&app, false);
+                }
+            }
             Msg::Zoom(step) if visible => {
                 let _ = app.emit_to("corner", "zoom", step);
                 continue;
@@ -403,12 +435,13 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                     st.frame = frame;
                     moved
                 };
-                if name == frontmost && !(moved && visible) {
+                if name == frontmost && !(moved && (visible || gems_visible)) {
                     continue;
                 }
-                // leaving the game hides the panel; coming back doesn't reopen it
+                // leaving the game hides the panels; coming back doesn't reopen them
                 if in_poe && !foreground::is_poe(&name) {
                     visible = false;
+                    gems_visible = false;
                 }
                 frontmost = name;
             }
@@ -428,6 +461,14 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
         };
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
+            if let Some(win) = handle.get_webview_window(GEM_PANEL) {
+                if gems_visible {
+                    position_panel(&handle, &win);
+                    show(&win)
+                } else {
+                    hide(&win)
+                }
+            }
             let Some(win) = handle.get_webview_window("corner") else { return };
             if status.visible {
                 position_panel(&handle, &win);
@@ -884,8 +925,8 @@ fn resync(app: &AppHandle) {
 /// Shrinks the corner window to the panel, so the empty space under it doesn't
 /// catch clicks meant for the game.
 #[tauri::command]
-fn fit_panel(height: f64, app: AppHandle) {
-    let Some(win) = app.get_webview_window("corner") else { return };
+fn fit_panel(height: f64, which: Option<String>, app: AppHandle) {
+    let Some(win) = app.get_webview_window(panel_label(which.as_deref())) else { return };
     let Ok(scale) = win.scale_factor() else { return };
     let Ok(size) = win.outer_size() else { return };
     let width = size.width as f64 / scale;
@@ -897,8 +938,16 @@ fn fit_panel(height: f64, app: AppHandle) {
 /// The player dragging the Corner panel by its title: `dx`, `dy` are logical pixels
 /// since the drag started. Dropping it remembers the spot within the game window.
 #[tauri::command]
-fn drag_panel(phase: String, dx: f64, dy: f64, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let Some(win) = app.get_webview_window("corner") else { return Ok(()) };
+fn drag_panel(
+    phase: String,
+    dx: f64,
+    dy: f64,
+    which: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let gems = which.as_deref() == Some("gems");
+    let Some(win) = app.get_webview_window(panel_label(which.as_deref())) else { return Ok(()) };
     // window queries first, so the app state is never locked while waiting on the window
     let scale = win.scale_factor().map_err(|e| e.to_string())?;
     let pos = win.outer_position().map_err(|e| e.to_string())?;
@@ -920,7 +969,12 @@ fn drag_panel(phase: String, dx: f64, dy: f64, app: AppHandle, state: State<'_, 
     if phase == "end" {
         st.drag_from = None;
         if let Some(frame) = frame {
-            st.saved.panel_spot = Some(placement::spot_of(frame, size, at));
+            let spot = Some(placement::spot_of(frame, size, at));
+            if gems {
+                st.saved.gem_spot = spot;
+            } else {
+                st.saved.panel_spot = spot;
+            }
             store::save(&st.path, &st.saved)?;
         }
     }
@@ -1017,7 +1071,9 @@ async fn update(app: AppHandle, menu: Menu<tauri::Wry>) {
     if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
         return eprintln!("update to {} failed: {e}", update.version);
     }
-    let panel_shown = app.get_webview_window("corner").and_then(|w| w.is_visible().ok()).unwrap_or(false);
+    let panel_shown = ["corner", GEM_PANEL]
+        .iter()
+        .any(|l| app.get_webview_window(l).and_then(|w| w.is_visible().ok()).unwrap_or(false));
     if !panel_shown {
         app.restart();
     }
@@ -1129,6 +1185,17 @@ pub fn run() {
             }
             #[cfg(target_os = "windows")]
             no_activate(&win);
+            // the Gem panel follows the same rules: mouse only, never the keyboard
+            if let Some(gem_win) = app.get_webview_window(GEM_PANEL) {
+                place_in_corner(&gem_win);
+                #[cfg(target_os = "macos")]
+                {
+                    macos::make_nonactivating(&gem_win);
+                    macos::float_over_fullscreen(&gem_win);
+                }
+                #[cfg(target_os = "windows")]
+                no_activate(&gem_win);
+            }
 
             // closing the Main window only hides it, so the tray can reopen it
             if let Some(main) = app.get_webview_window("main") {
@@ -1147,12 +1214,14 @@ pub fn run() {
             let tray_tx = tx.clone();
             app.manage(KeyTx(Mutex::new(tx.clone())));
             let panel_item = MenuItem::with_id(app, "panel", "Show/Hide panel", true, None::<&str>)?;
+            let gem_item = MenuItem::with_id(app, "gempanel", "Show/Hide gem panel", true, None::<&str>)?;
+            let gems_item = MenuItem::with_id(app, "gems", "Open gems…", true, None::<&str>)?;
             let tree_item = MenuItem::with_id(app, "tree", "Open tree…", true, None::<&str>)?;
             let build_item = MenuItem::with_id(app, "build", "Set up build…", true, None::<&str>)?;
             let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let resync_item = MenuItem::with_id(app, "resync", "Re-sync character…", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit POE Tracker", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&panel_item, &tree_item, &build_item, &settings_item, &resync_item, &quit])?;
+            let menu = Menu::with_items(app, &[&panel_item, &gem_item, &tree_item, &gems_item, &build_item, &settings_item, &resync_item, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("POE Tracker")
@@ -1161,6 +1230,10 @@ pub fn run() {
                     "panel" => {
                         let _ = tray_tx.send(Msg::TogglePanel);
                     }
+                    "gempanel" => {
+                        let _ = tray_tx.send(Msg::ToggleGemPanel);
+                    }
+                    "gems" => open_main(app, Some("gems")),
                     "tree" => open_main(app, Some("tree")),
                     "build" => open_main(app, Some("build")),
                     "settings" => open_main(app, Some("settings")),
