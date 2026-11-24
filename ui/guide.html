@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>POE Tracker · Guide panel</title>
+<style>
+  /* Guide panel: the Leveling guide's current Guide step, in a strip above the skill bar.
+     Every line of the step, hints under their line, the area to enter next set apart at the end. */
+  :root {
+    --ink: #e0d6c3; --dim: #aa9e82; --faint: #4a4135;
+    --alloc: #d9b45a; --next: #8888ff; --plan: #8a8072; --kill: #e09a4f; --item: #c9b98f;
+    --panel: rgba(11, 10, 8, .92); --edge: #6e5a3a; --rule: #3b3328;
+    --body: -apple-system, "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, Menlo, Consolas, monospace;
+  }
+  html, body { margin: 0; background: transparent; color: var(--ink); font-family: var(--body); }
+  .panel { margin: 8px; padding: 8px 12px 6px; border-radius: 6px; background: var(--panel); border: 1px solid var(--edge);
+    font-size: 12.5px; line-height: 1.45; display: flex; flex-direction: column; gap: 4px; }
+  ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  li.last { border-top: 1px solid var(--rule); margin-top: 2px; padding-top: 3px; }
+  .sub { padding-left: 16px; font-size: 11px; color: var(--dim); }
+  .note { margin: 0; color: var(--dim); }
+  .note b { color: var(--alloc); font-weight: 600; }
+  footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; font: 500 10.5px var(--mono); color: var(--plan);
+    cursor: move; user-select: none; -webkit-user-select: none; }
+  footer .keys { display: none; font-family: var(--body); }
+  .panel:hover footer .keys { display: inline; }
+  .nav { display: flex; gap: 4px; }
+  button { font: 600 12px var(--body); color: var(--ink); background: #1a1712; border: 1px solid var(--rule); border-radius: 4px;
+    padding: 0 7px; line-height: 18px; cursor: pointer; }
+  button:hover { border-color: var(--edge); }
+  button:disabled { opacity: .35; cursor: default; }
+</style>
+</head>
+<body>
+<div class="panel" id="panel"><p class="note">Loading…</p></div>
+<script src="keys.js"></script>
+<script src="guide-parts.js"></script>
+<script>
+  const { invoke } = window.__TAURI__.core
+  const { listen } = window.__TAURI__.event
+  const { esc, line } = GuideParts
+  document.querySelector('style').textContent += GuideParts.css
+  const panel = document.getElementById('panel')
+  let hotkey = KeyLabel.format({ code: 'KeyL', alt: true })
+  let view = null
+
+  function render() {
+    const v = view
+    if (!v) return
+    const total = v.steps.length
+    const keys = `<span class="keys">${esc(hotkey)} or Esc hides · drag here to move</span>`
+    const nav = `<span class="nav"><button data-go="-1" aria-label="Previous step" ${v.step === 0 ? 'disabled' : ''}>‹</button><button data-go="1" aria-label="Next step" ${v.step >= total ? 'disabled' : ''}>›</button></span>`
+    if (v.step >= total) {
+      panel.innerHTML = `<p class="note"><b>Campaign done.</b> The whole route is in the Guide section (Open guide… in the POE Tracker menu).</p>
+        <footer><span>Acts 1–10 done</span>${keys}${nav}</footer>`
+      return
+    }
+    const s = v.steps[v.step]
+    const rows = s.lines.map((l, i) => `<li class="${i === s.lines.length - 1 && s.to ? 'last' : ''}">${line(l.parts)}${l.subs.map(x => `<div class="sub">${line(x)}</div>`).join('')}</li>`).join('')
+    panel.innerHTML = `<ol>${rows}</ol><footer><span>Act ${s.act} · step ${v.step + 1}/${total}</span>${keys}${nav}</footer>`
+  }
+
+  const load = () => invoke('guide_view').then(v => { view = v; render() })
+  load()
+  listen('guide', load)
+  // another Character's progress
+  listen('plan', load)
+  const useBinds = b => { if (b.guide_toggle) hotkey = KeyLabel.format(b.guide_toggle); render() }
+  invoke('key_binds').then(useBinds)
+  listen('binds', e => useBinds(e.payload))
+
+  panel.addEventListener('click', e => {
+    const b = e.target.closest('button[data-go]')
+    if (b && view) invoke('guide_jump', { step: Math.max(0, view.step + Number(b.dataset.go)) })
+  })
+
+  // the window follows the panel's height (plus its 8px margins)
+  let fitted = 0
+  new ResizeObserver(() => {
+    const h = Math.ceil(panel.getBoundingClientRect().height) + 16
+    if (h !== fitted) { fitted = h; invoke('fit_panel', { height: h, which: 'guide' }) }
+  }).observe(panel)
+
+  // dragging the footer moves the panel within the game window; the app remembers the spot
+  let moving = null
+  const drag = (phase, dx, dy) => invoke('drag_panel', { phase, dx, dy, which: 'guide' })
+  panel.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || !e.target.closest('footer') || e.target.closest('button')) return
+    moving = { x: e.screenX, y: e.screenY, dx: 0, dy: 0 }
+    panel.setPointerCapture(e.pointerId)
+    drag('start', 0, 0)
+  })
+  panel.addEventListener('pointermove', e => {
+    if (!moving) return
+    moving.dx = e.screenX - moving.x; moving.dy = e.screenY - moving.y
+    drag('move', moving.dx, moving.dy)
+  })
+  const endMove = e => {
+    if (!moving) return
+    if (e.type === 'pointerup') { moving.dx = e.screenX - moving.x; moving.dy = e.screenY - moving.y }
+    drag('end', moving.dx, moving.dy)
+    moving = null
+  }
+  panel.addEventListener('pointerup', endMove)
+  panel.addEventListener('pointercancel', endMove)
+  panel.addEventListener('lostpointercapture', endMove)
+</script>
+</body>
+</html>
