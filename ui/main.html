@@ -11,7 +11,7 @@
        Magic-item blue for what's next, red for refunds */
     --scene: #0b0a08; --scene2: #1a1712; --ink: #e0d6c3; --dim: #aa9e82; --faint: #4a4135;
     --alloc: #d9b45a; --next: #8888ff; --plan: #8a8072; --other: #2a251e; --refund: #e04a3f;
-    --kill: #e09a4f; --item: #c9b98f;
+    --kill: #e09a4f; --item: #c9b98f; --ok: #7fbf6a;
     --card: #141210; --edge: #3b3328;
     --display: "Cinzel", "Trajan Pro", Georgia, serif;
     --body: -apple-system, "Segoe UI", system-ui, sans-serif;
@@ -537,6 +537,7 @@
     const top = `<div class="treebar guidebar">
       ${v.character ? `<span class="who">${esc(v.character)}</span>` : ''}
       <div class="progress"><div class="bar"><i style="width:${total ? 100 * done / total : 0}%"></i></div><span>${done} / ${total}</span></div>
+      ${GuideParts.exp(v)}
       <label class="opt" title="Side content for a fresh character: trials, extra waypoints, the Tidal Island and more"><input type="checkbox" id="leagueStart"${o.league_start ? ' checked' : ''}> League start</label>
       <select id="bandit" aria-label="Act 2 bandits">${bandits.map(([k, t]) => `<option value="${k}"${o.bandit === k ? ' selected' : ''}>${t}</option>`).join('')}</select></div>`
     let act = 0
@@ -544,11 +545,11 @@
     for (const [i, s] of v.steps.entries()) {
       if (s.act !== act) { act = s.act; rows.push(`<h2>Act ${act}</h2>`) }
       const state = i < v.step ? 'done' : i === v.step ? 'cur' : ''
-      const lines = s.lines.map(l => `<div class="ln">${GuideParts.line(l.parts)}${l.subs.map(x => `<div class="sub">${GuideParts.line(x)}</div>`).join('')}</div>`).join('')
+      const lines = s.lines.map(l => `<div class="ln">${GuideParts.line(l.parts)}${l.subs.map(x => `<div class="sub">${GuideParts.line(x)}</div>`).join('')}${GuideParts.gems(l.gems)}</div>`).join('')
       rows.push(`<button class="gstep ${state}" data-step="${i}"${state === 'cur' ? ' aria-current="step"' : ''} title="${state === 'cur' ? 'The current step' : 'Make this the current step'}"><span class="n">${state === 'done' ? '✓' : i + 1}</span><span>${lines}</span></button>`)
     }
     if (v.step >= total) rows.push('<p class="gdone">Campaign done: Acts 1–10.</p>')
-    const credit = `<p class="credit">Route from exile-leveling by HeartofPhos (MIT), with quest data from poewiki. Entering each step's last area moves the guide on; click a step to move it by hand.</p>`
+    const credit = `<p class="credit">Route from exile-leveling by HeartofPhos (MIT), with quest data from poewiki. Entering each step's last area moves the guide on; click a step to move it by hand. ${v.gems ? '★ Take and $ Buy are the Build’s gems (✓ already socketed); click a gem name to copy it.' : 'Load a Build to see which gems to take and buy.'}</p>`
     const body = el.querySelector('.guidebody')
     const scrolled = body?.scrollTop ?? 0
     el.innerHTML = `${top}<div class="guidebody"><div>${rows.join('')}${credit}</div></div>`
@@ -559,6 +560,7 @@
     $('bandit').onchange = setOptions
   }
   const setOptions = () => invoke('guide_options', { options: { league_start: $('leagueStart').checked, bandit: $('bandit').value } })
+  GuideParts.copyOnClick($('guide'))
   $('guide').addEventListener('click', e => {
     const b = e.target.closest('.gstep')
     if (b && !b.classList.contains('cur')) invoke('guide_jump', { step: Number(b.dataset.step) })

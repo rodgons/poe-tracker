@@ -277,7 +277,7 @@ mod tests {
         }
     }
     fn gem(name: &str, support: bool) -> Gem {
-        Gem { name: name.into(), support, level: 20, quality: 20, enabled: true }
+        Gem { name: name.into(), support, level: 20, quality: 20, enabled: true, id: String::new() }
     }
     fn set(groups: Vec<Vec<Gem>>) -> SkillSet {
         SkillSet {

@@ -41,7 +41,7 @@ _Avoid_: Setup window, Build window
 **Leveling guide**: The route through the Path of Exile 1 campaign, Acts 1–10, split into Guide steps, telling the player what to do in each zone. It follows the Character on its own: entering the area that ends the current Guide step moves it to the next, and entering the area of a later step skips ahead to that step. It never moves back by itself; any other area (a town, the hideout, an earlier zone) leaves it where it is.
 _Avoid_: Act tracker, campaign guide
 
-**Guide step**: One step of the Leveling guide: what to do in the current zone, ending with the area to enter next. Entering that area completes the step.
+**Guide step**: One step of the Leveling guide: what to do in the current zone, including which of the Build's gems to take as a quest reward or buy from a quest NPC, ending with the area to enter next. Entering that area completes the step.
 
 **Guide panel**: A third small panel inside the game window, apart from the Corner panel and the Gem panel, that shows the current Guide step. Toggled by the Guide panel hotkey, movable, mouse only, and never shown outside the game.
 

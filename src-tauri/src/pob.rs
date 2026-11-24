@@ -57,6 +57,9 @@ pub struct Gem {
     pub quality: u32,
     /// off in PoB: the author's optional pick
     pub enabled: bool,
+    /// PoB's gem id ("Metadata/Items/Gems/SkillGemCleave"); empty in builds saved before v0.8.1
+    #[serde(default)]
+    pub id: String,
 }
 
 /// Turns what the player pasted into a raw build code, fetching links.
@@ -160,6 +163,7 @@ fn parse_skills(doc: &roxmltree::Document) -> (Vec<SkillSet>, usize) {
                             level: num(gem, "level"),
                             quality: num(gem, "quality"),
                             enabled: flag(gem, "enabled"),
+                            id: gem.attribute("gemId").unwrap_or("").to_string(),
                         })
                     })
                     .collect(),
@@ -240,7 +244,7 @@ mod tests {
         assert_eq!(clean_title(&b.skill_sets[b.active_skill_set].title), "Level 1-30 {1}");
         let first = &b.skill_sets[0];
         let slam = first.groups.iter().find(|g| g.label == "Ground Slam").unwrap();
-        assert_eq!(slam.gems[0], Gem { name: "Ground Slam".into(), support: false, level: 9, quality: 0, enabled: true });
+        assert_eq!(slam.gems[0], Gem { name: "Ground Slam".into(), support: false, level: 9, quality: 0, enabled: true, id: "Metadata/Items/Gems/SkillGemGroundSlam".into() });
         assert!(slam.gems[1].support);
         assert!(first.groups.iter().any(|g| g.gems.is_empty()), "label-only groups are kept as headings");
     }
@@ -256,6 +260,7 @@ mod tests {
         let g = &b.skill_sets[0].groups;
         assert_eq!(g[0].gems[0].quality, 20);
         assert!(g[0].gems[1].support && !g[0].gems[1].enabled);
+        assert_eq!(g[0].gems[0].id, "Metadata/Items/Gems/SkillGemCleave");
         assert!(g[1].granted);
     }
 

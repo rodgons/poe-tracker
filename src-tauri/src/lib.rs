@@ -52,6 +52,8 @@ struct App {
     update_ready: Option<String>,
     /// the Character's socketed gems from the last items import
     gems: Gems,
+    /// the level of the area the player is in, from the log
+    area_level: Option<u32>,
 }
 
 /// The last items import from pathofexile.com, and when it can run again.
@@ -194,7 +196,11 @@ fn import_gems(handle: &AppHandle, asked: bool) {
             return;
         }
         match got {
-            Ok(owned) => {
+            Ok((owned, level)) => {
+                if level.is_some() && st.saved.guide_progress().level != level {
+                    st.saved.guide_mut().level = level;
+                    let _ = store::save(&st.path, &st.saved);
+                }
                 st.gems.owned = Some(owned);
                 st.gems.at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs());
                 st.gems.error = None;
@@ -203,6 +209,8 @@ fn import_gems(handle: &AppHandle, asked: bool) {
         }
         drop(st);
         let _ = app.emit("gems", ());
+        // gems now socketed, and the Character's level
+        let _ = app.emit("guide", ());
     });
 }
 
@@ -587,7 +595,12 @@ fn on_log_line(handle: &AppHandle, line: &str) {
     let app = &mut *guard;
     let t = tree::tree();
     let changed = match event {
-        clientlog::Event::LevelUp { character, .. } => {
+        clientlog::Event::LevelUp { character, level } => {
+            if character.eq_ignore_ascii_case(&app.saved.character) {
+                app.saved.guide_mut().level = Some(level);
+                let _ = store::save(&app.path, &app.saved);
+                let _ = handle.emit("guide", ());
+            }
             let changed = app.playing.as_deref() != Some(character.as_str());
             app.playing = Some(character);
             changed
@@ -622,7 +635,8 @@ fn on_log_line(handle: &AppHandle, line: &str) {
                 _ => false,
             }
         }
-        clientlog::Event::Entered { area, .. } => {
+        clientlog::Event::Entered { area, level } => {
+            app.area_level = Some(level);
             // the log handler holds the state: import once it lets go
             let h = handle.clone();
             std::thread::spawn(move || import_gems(&h, false));
@@ -632,8 +646,9 @@ fn on_log_line(handle: &AppHandle, line: &str) {
             if step != progress.step {
                 app.saved.guide_mut().step = step;
                 let _ = store::save(&app.path, &app.saved);
-                let _ = handle.emit("guide", ());
             }
+            // the new area's level, even when the step stays
+            let _ = handle.emit("guide", ());
             let s = &app.saved;
             let spec = s.build.as_ref().and_then(|b| b.specs.get(s.spec));
             if let Some(spec) = spec.filter(|_| !app.refunding.is_empty() && !app.refund_unchecked && !s.account.is_empty()) {
@@ -1038,20 +1053,68 @@ struct GuideView {
     character: String,
     /// the exile-leveling commit the route came from
     source: String,
+    /// the Character's level and the area levels that give it full experience, when known
+    level: Option<u32>,
+    full_exp: Option<(u32, u32)>,
+    /// the level of the area the player is in, since the app started
+    area_level: Option<u32>,
+    /// the Build has gems the guide can pick (false: no Build, or no gem the route gives)
+    gems: bool,
 }
 
 #[tauri::command]
 fn guide_view(state: State<'_, AppState>) -> GuideView {
     let st = state.lock().unwrap();
+    let route = guide::route();
     let progress = st.saved.guide_progress();
-    let steps = guide::steps(guide::route(), &progress.options);
+    let mut steps = guide::steps(route, &progress.options);
+    let plan = gem_plan(&st);
+    if let Some(plan) = &plan {
+        guide::pick_gems(route, &mut steps, plan);
+    }
+    // before the first area change since the app started: the area the last step entered
+    let area_level = st.area_level.or_else(|| {
+        let last = steps.get(progress.step.checked_sub(1)?)?.to.as_deref()?;
+        route.areas.get(last).map(|a| a.level)
+    });
     GuideView {
         step: progress.step.min(steps.len()),
         steps,
         options: progress.options,
         character: st.saved.character.clone(),
-        source: guide::route().source.clone(),
+        source: route.source.clone(),
+        level: progress.level,
+        full_exp: progress.level.map(guide::full_exp),
+        area_level,
+        gems: plan.is_some_and(|p| !p.wanted.is_empty()),
     }
+}
+
+/// Puts a gem name on the clipboard for the game's search. Done here because the Guide
+/// panel never takes focus, and a page without focus can't write the clipboard.
+#[tauri::command]
+fn copy_text(text: String, app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard().write_text(text).map_err(|e| e.to_string())
+}
+
+/// The Build's gems for the guide: every gem switched on in PoB across all Skill sets,
+/// for the class of the Tree spec being followed.
+fn gem_plan(st: &App) -> Option<guide::GemPlan> {
+    let route = guide::route();
+    let build = st.saved.build.as_ref()?;
+    let class = CLASSES.get(build.specs.get(st.saved.spec)?.class_id as usize)?.to_string();
+    let mut wanted: Vec<String> = Vec::new();
+    let gems = build.skill_sets.iter().flat_map(|s| &s.groups).filter(|g| g.enabled && !g.granted).flat_map(|g| &g.gems);
+    for gem in gems.filter(|g| g.enabled) {
+        if let Some(id) = route.reward_id(&gem.id, &gem.name) {
+            if !wanted.contains(&id) {
+                wanted.push(id);
+            }
+        }
+    }
+    let socketed = st.gems.owned.iter().flatten().flat_map(|g| [Some(&g.name), g.vaal_base.as_ref()]).flatten().map(|n| n.to_lowercase()).collect();
+    Some(guide::GemPlan { class, wanted, socketed })
 }
 
 /// The player moving the guide by hand: the Guide panel's ‹ › or a click in the Guide section.
@@ -1222,6 +1285,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         // the Main window's size and position; never whether it's showing, and never the panel
         .plugin(
             tauri_plugin_window_state::Builder::new()
@@ -1268,6 +1332,7 @@ pub fn run() {
             guide_view,
             guide_jump,
             guide_options,
+            copy_text,
             app_info,
             restart_to_update,
             open_input_monitoring
@@ -1277,7 +1342,7 @@ pub fn run() {
             let saved = store::load(&path);
             keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default() }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default(), area_level: None }));
             upgrade_build(app.handle().clone());
 
             #[cfg(target_os = "macos")]
