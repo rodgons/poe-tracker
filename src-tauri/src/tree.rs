@@ -84,7 +84,7 @@ pub struct DrawnNode {
     d: Vec<String>,
 }
 
-/// One point of the Tree spec in the Build window's list.
+/// One point of the Tree spec in the list in the Main window's Tree section.
 #[derive(Clone, Serialize)]
 pub struct ListedPoint {
     id: u32,
@@ -110,7 +110,18 @@ pub struct PanelView {
     refunds: Vec<String>,
     /// Pending refunds: Allocated nodes clicked to refund in game, not yet settled
     pub pending: Vec<u32>,
+    /// what the Pending refunds are and when they settle
+    pub pending_note: Option<String>,
+    /// side notes (a Re-sync's result, nodes left out); nothing the player must act on
     pub notices: Vec<String>,
+    /// why points have stopped ticking, when they have: the panel puts it in a banner
+    pub stopped: Option<String>,
+    /// what puts ticking right again: "resync" or "log"
+    pub stopped_fix: Option<&'static str>,
+    /// the Character the points tick for
+    pub character: String,
+    /// the Tree spec couldn't be read, so there's nothing to draw
+    pub error: Option<String>,
     /// the Build's following Tree spec, named when this one is complete
     pub next_spec: Option<String>,
     /// min x, min y, max x, max y of what's drawn
@@ -344,9 +355,38 @@ impl Plan {
                 .collect(),
             refunds,
             pending: Vec::new(),
+            pending_note: None,
             notices,
+            stopped: None,
+            stopped_fix: None,
+            character: String::new(),
+            error: None,
             next_spec: None,
             bounds,
+        }
+    }
+}
+
+impl PanelView {
+    /// A Tree spec that can't be drawn: the panel says why instead of claiming there's no build.
+    pub fn unreadable(spec: &str, error: String) -> PanelView {
+        PanelView {
+            spec: spec.to_string(),
+            done: 0,
+            total: 0,
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            next: Vec::new(),
+            refunds: Vec::new(),
+            pending: Vec::new(),
+            pending_note: None,
+            notices: Vec::new(),
+            stopped: None,
+            stopped_fix: None,
+            character: String::new(),
+            error: Some(error),
+            next_spec: None,
+            bounds: (0, 0, 0, 0),
         }
     }
 }

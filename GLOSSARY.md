@@ -20,10 +20,9 @@
 
 **Corner panel**: The small panel inside the game window (top-right unless the player drags it elsewhere) that holds the Mini-tree, the Tree spec's progress and any Refunds. Toggled by the Panel hotkey while Path of Exile is the frontmost app, and never shown outside the game. The player can zoom and move its Mini-tree with the mouse, but it never takes the keyboard from the game.
 
-**Setup window**: The ordinary app window where the player pastes their Build, picks the Tree spec and names their Character. Opened on first launch and from the tray menu.
+**Main window**: The one ordinary app window, away from the game, divided into sections the player moves between: **Tree** (the whole Tree spec large, every point in order, the Refunds and the choice of current Tree spec), **Build** (paste the Build, pick the Tree spec, name the Character and set the Seed) and **Settings** (how many Next points, the Client log and the key binds). Opened on first launch and from the tray menu, which can open it at any section. It shows the Character's progress but never changes which nodes are Allocated.
+_Avoid_: Setup window, Build window
 
-**Build window**: The ordinary app window for following the Build away from the game: the whole Tree spec large, every point in order, the Refunds, and the choice of current Tree spec. It shows the Character's progress but never changes which nodes are Allocated.
-
-**Panel hotkey**: The key combination (⌥/Alt+P unless the player rebinds it under Key binds in the Setup window) that toggles the Corner panel. Distinct from the game's own key for opening the passive tree, which the app ignores. While the game is in front the app takes the Panel hotkey from it, because the game ignores modifiers and would otherwise read ⌥/Alt+P as P.
+**Panel hotkey**: The key combination (⌥/Alt+P unless the player rebinds it under Key binds in the Main window's Settings section) that toggles the Corner panel. Distinct from the game's own key for opening the passive tree, which the app ignores. While the game is in front the app takes the Panel hotkey from it, because the game ignores modifiers and would otherwise read ⌥/Alt+P as P.
 
 **Client log**: The `Client.txt` file the game appends to as things happen; the source of live allocation events.

@@ -1,6 +1,6 @@
 [package]
 name = "poe-tracker"
-version = "0.5.4"
+version = "0.5.5"
 edition = "2021"
 license = "GPL-3.0-only"
 
@@ -31,6 +31,8 @@ ureq = "2"
 # Listen-only global key hook. Crates.io release is from 2023; main has the
 # macOS off-main-thread fix (set_is_main_thread). See docs/research/tauri-platform.md.
 rdev = { git = "https://github.com/Narsil/rdev", rev = "b7e201bf80be7b9632207366f277d29fe732b9c1", features = ["x11"] }
+# remembers the Main window's size and position
+tauri-plugin-window-state = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

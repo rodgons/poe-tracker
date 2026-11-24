@@ -29,7 +29,7 @@ mod tree;
 struct App {
     path: PathBuf,
     saved: store::Saved,
-    /// a build loaded in the Setup window but not saved yet, with what was pasted
+    /// a build loaded in the Build section but not saved yet, with what was pasted
     pending: Option<(String, pob::Build)>,
     /// the Client.txt being followed, if one was found
     watching: Option<PathBuf>,
@@ -46,6 +46,8 @@ struct App {
     refunding: Vec<u32>,
     /// that import failed (or there's no account): wait for a Re-sync instead
     refund_unchecked: bool,
+    /// a downloaded update's version, waiting for a restart
+    update_ready: Option<String>,
 }
 
 impl App {
@@ -274,7 +276,7 @@ fn poll_frontmost(tx: mpsc::Sender<Msg>) {
     }
 }
 
-/// the most Next points the Setup window lets the panel number
+/// the most Next points the Settings section lets the panel number
 const MAX_POINTS: usize = 15;
 
 fn spec_choices(build: &pob::Build) -> Vec<SpecChoice> {
@@ -290,18 +292,29 @@ fn spec_choices(build: &pob::Build) -> Vec<SpecChoice> {
 
 fn panel_view_of(app: &App) -> Option<tree::PanelView> {
     let saved = &app.saved;
-    let spec = saved.build.as_ref()?.specs.get(saved.spec)?;
-    let plan = tree::Plan::new(tree::tree(), spec).ok()?;
-    let allocated: HashSet<u32> = saved.allocated.iter().copied().collect();
-    let mut view = plan.view(tree::tree(), &allocated, saved.points);
-    view.next_spec = saved.build.as_ref()?.specs.get(saved.spec + 1).map(|s| s.title.clone());
+    let build = saved.build.as_ref()?;
+    let spec = build.specs.get(saved.spec)?;
+    let mut view = match tree::Plan::new(tree::tree(), spec) {
+        Ok(plan) => {
+            let allocated: HashSet<u32> = saved.allocated.iter().copied().collect();
+            plan.view(tree::tree(), &allocated, saved.points)
+        }
+        Err(e) => tree::PanelView::unreadable(&spec.title, e),
+    };
+    view.character = saved.character.clone();
+    view.next_spec = build.specs.get(saved.spec + 1).map(|s| s.title.clone());
     if let Some(note) = &app.synced {
         view.notices.insert(0, note.clone());
     }
     if let Some(other) = app.paused_for() {
-        view.notices.insert(0, format!("Playing {other}? Ticking paused (Re-sync character to resume)"));
+        view.stopped = Some(format!(
+            "Ticking paused: the game log shows {other} playing, not {}. Re-sync character to resume.",
+            saved.character
+        ));
+        view.stopped_fix = Some("resync");
     } else if app.watching.is_none() {
-        view.notices.push("Client.txt not found: points won't tick. Pick it in Set up build…".into());
+        view.stopped = Some("Client.txt not found, so points won't tick. Pick it in Settings.".into());
+        view.stopped_fix = Some("log");
     }
     if !app.refunding.is_empty() {
         let t = tree::tree();
@@ -309,9 +322,9 @@ fn panel_view_of(app: &App) -> Option<tree::PanelView> {
         let when = if app.refund_unchecked || app.saved.account.is_empty() {
             "Re-sync character once applied"
         } else {
-            "checked on pathofexile.com when you change area"
+            "checked when you change area"
         };
-        view.notices.insert(0, format!("Pending refund: {} ({when})", names.join(", ")));
+        view.pending_note = Some(format!("{} ({when})", names.join(", ")));
         view.pending = app.refunding.clone();
     }
     Some(view)
@@ -519,7 +532,7 @@ fn import_allocated(account: &str, character: &str, spec: &pob::Spec) -> Result<
     Ok(allocated)
 }
 
-/// Lists the account's characters for the Setup window.
+/// Lists the account's characters for the Build section.
 #[tauri::command]
 async fn find_characters(account: String) -> Result<Vec<poeapi::Character>, String> {
     tauri::async_runtime::spawn_blocking(move || poeapi::characters(&account)).await.map_err(|e| e.to_string())?
@@ -533,7 +546,6 @@ async fn save_setup(
     account: String,
     character: String,
     taken: Option<usize>,
-    points: usize,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
@@ -576,20 +588,61 @@ async fn save_setup(
     st.saved.allocated = allocated;
     st.refunding.clear();
     st.refund_unchecked = false;
-    st.saved.points = points.clamp(1, MAX_POINTS);
     // saving (or re-syncing) says the Character is the one playing
     st.playing = None;
     st.synced = None;
     store::save(&st.path, &st.saved)?;
     let _ = app.emit("plan", panel_view_of(st));
-    if let Some(win) = app.get_webview_window("setup") {
-        let _ = win.hide();
-    }
+    Ok(())
+}
+
+/// How many Next points the panel numbers: saved as soon as the player changes it.
+#[tauri::command]
+fn set_points(points: usize, app: AppHandle, state: State<'_, AppState>) -> Result<usize, String> {
+    let mut guard = state.lock().unwrap();
+    let st = &mut *guard;
+    st.saved.points = points.clamp(1, MAX_POINTS);
+    store::save(&st.path, &st.saved)?;
+    let _ = app.emit("plan", panel_view_of(st));
+    Ok(st.saved.points)
+}
+
+/// The Main window's Re-sync character button.
+#[tauri::command]
+fn resync_character(app: AppHandle) {
+    resync(&app);
+}
+
+#[derive(Serialize)]
+struct AppInfo {
+    version: String,
+    /// a downloaded update, waiting for a restart
+    update: Option<String>,
+}
+
+#[tauri::command]
+fn app_info(app: AppHandle, state: State<'_, AppState>) -> AppInfo {
+    AppInfo { version: app.package_info().version.to_string(), update: state.lock().unwrap().update_ready.clone() }
+}
+
+#[tauri::command]
+fn restart_to_update(app: AppHandle) {
+    app.restart();
+}
+
+/// Opens System Settings at Input Monitoring, where the player allows the key hook.
+#[tauri::command]
+fn open_input_monitoring() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+        .spawn()
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 /// Re-sync character: imports again when there's an account; without one, or
-/// when the import fails, opens the Setup window instead.
+/// when the import fails, opens the Main window's Build section instead.
 fn resync(app: &AppHandle) {
     let job = {
         let st = app.state::<AppState>();
@@ -602,7 +655,7 @@ fn resync(app: &AppHandle) {
             _ => None,
         }
     };
-    let Some((account, character, spec)) = job else { return open_setup(app) };
+    let Some((account, character, spec)) = job else { return open_main(app, Some("build")) };
     let app = app.clone();
     std::thread::spawn(move || match import_allocated(&account, &character, &spec) {
         Ok(allocated) => {
@@ -617,9 +670,9 @@ fn resync(app: &AppHandle) {
             let _ = app.emit("plan", panel_view_of(&st));
         }
         Err(e) => {
-            let _ = app.emit_to("setup", "resync_error", format!("Re-sync failed: {e}"));
+            let _ = app.emit_to("main", "resync_error", format!("Re-sync failed: {e}"));
             let handle = app.clone();
-            let _ = app.run_on_main_thread(move || open_setup(&handle));
+            let _ = app.run_on_main_thread(move || open_main(&handle, Some("build")));
         }
     });
 }
@@ -677,7 +730,7 @@ fn panel_view(state: State<'_, AppState>) -> Option<tree::PanelView> {
     panel_view_of(&state.lock().unwrap())
 }
 
-/// The Build window: everything about the current Tree spec, away from the game.
+/// The Tree section: everything about the current Tree spec, away from the game.
 #[derive(Serialize)]
 struct BuildView {
     view: tree::PanelView,
@@ -692,11 +745,14 @@ fn build_view(state: State<'_, AppState>) -> Option<BuildView> {
     let app = state.lock().unwrap();
     let saved = &app.saved;
     let build = saved.build.as_ref()?;
-    let plan = tree::Plan::new(tree::tree(), build.specs.get(saved.spec)?).ok()?;
     let allocated: HashSet<u32> = saved.allocated.iter().copied().collect();
+    // an unreadable spec still opens, so the player can pick another one
+    let points = tree::Plan::new(tree::tree(), build.specs.get(saved.spec)?)
+        .map(|plan| plan.points(tree::tree(), &allocated))
+        .unwrap_or_default();
     Some(BuildView {
         view: panel_view_of(&app)?,
-        points: plan.points(tree::tree(), &allocated),
+        points,
         specs: spec_choices(build),
         spec: saved.spec,
         character: saved.character.clone(),
@@ -720,12 +776,17 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
     Ok(())
 }
 
-fn open_build(app: &AppHandle) {
-    let Some(win) = app.get_webview_window("build") else { return };
+/// Shows the Main window, at `section` ("tree", "build" or "settings") when given;
+/// otherwise the page picks (Build until a build is saved, then the last section used).
+fn open_main(app: &AppHandle, section: Option<&str>) {
+    let Some(win) = app.get_webview_window("main") else { return };
     #[cfg(target_os = "macos")]
     {
         macos::set_dock_icon(true);
         macos::activate();
+    }
+    if let Some(section) = section {
+        let _ = win.emit("section", section);
     }
     let _ = win.show();
     let _ = win.unminimize();
@@ -754,6 +815,10 @@ async fn update(app: AppHandle, menu: Menu<tauri::Wry>) {
     if !panel_shown {
         app.restart();
     }
+    if let Some(st) = app.try_state::<AppState>() {
+        st.lock().unwrap().update_ready = Some(update.version.clone());
+    }
+    let _ = app.emit_to("main", "update_ready", &update.version);
     let label = format!("Restart to update to v{}", update.version);
     match MenuItem::with_id(&app, "update", label, true, None::<&str>) {
         Ok(item) => {
@@ -761,15 +826,6 @@ async fn update(app: AppHandle, menu: Menu<tauri::Wry>) {
         }
         Err(e) => eprintln!("update menu item: {e}"),
     }
-}
-
-fn open_setup(app: &AppHandle) {
-    let Some(win) = app.get_webview_window("setup") else { return };
-    #[cfg(target_os = "macos")]
-    macos::activate();
-    let _ = win.show();
-    let _ = win.unminimize();
-    let _ = win.set_focus();
 }
 
 #[tauri::command]
@@ -795,6 +851,15 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // the Main window's size and position; never whether it's showing, and never the panel
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_denylist(&["corner"])
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all() - tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -823,14 +888,19 @@ pub fn run() {
             fit_panel,
             drag_panel,
             build_view,
-            set_spec
+            set_spec,
+            set_points,
+            resync_character,
+            app_info,
+            restart_to_update,
+            open_input_monitoring
         ])
         .setup(|app| {
             let path = store::path(app.path().app_config_dir()?);
             let saved = store::load(&path);
             keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None }));
 
             #[cfg(target_os = "macos")]
             {
@@ -850,18 +920,15 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             no_activate(&win);
 
-            // closing the Setup or Build window only hides it, so the tray can reopen it
-            for label in ["setup", "build"] {
-                let Some(win) = app.get_webview_window(label) else { continue };
-                let handle = win.clone();
-                win.on_window_event(move |e| {
+            // closing the Main window only hides it, so the tray can reopen it
+            if let Some(main) = app.get_webview_window("main") {
+                let handle = main.clone();
+                main.on_window_event(move |e| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = e {
                         api.prevent_close();
                         let _ = handle.hide();
                         #[cfg(target_os = "macos")]
-                        if handle.label() == "build" {
-                            macos::set_dock_icon(false);
-                        }
+                        macos::set_dock_icon(false);
                     }
                 });
             }
@@ -870,11 +937,12 @@ pub fn run() {
             let tray_tx = tx.clone();
             app.manage(KeyTx(Mutex::new(tx.clone())));
             let panel_item = MenuItem::with_id(app, "panel", "Show/Hide panel", true, None::<&str>)?;
-            let build_item = MenuItem::with_id(app, "build", "Open build…", true, None::<&str>)?;
-            let setup_item = MenuItem::with_id(app, "setup", "Set up build…", true, None::<&str>)?;
+            let tree_item = MenuItem::with_id(app, "tree", "Open tree…", true, None::<&str>)?;
+            let build_item = MenuItem::with_id(app, "build", "Set up build…", true, None::<&str>)?;
+            let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let resync_item = MenuItem::with_id(app, "resync", "Re-sync character…", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit POE Tracker", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&panel_item, &build_item, &setup_item, &resync_item, &quit])?;
+            let menu = Menu::with_items(app, &[&panel_item, &tree_item, &build_item, &settings_item, &resync_item, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("POE Tracker")
@@ -883,17 +951,18 @@ pub fn run() {
                     "panel" => {
                         let _ = tray_tx.send(Msg::TogglePanel);
                     }
-                    "build" => open_build(app),
-                    "setup" => open_setup(app),
+                    "tree" => open_main(app, Some("tree")),
+                    "build" => open_main(app, Some("build")),
+                    "settings" => open_main(app, Some("settings")),
                     "resync" => resync(app),
                     "update" => app.restart(),
                     "quit" => app.exit(0),
                     _ => {}
                 })
                 .build(app)?;
-            // the panel no longer shows at launch, so a missing permission is told in setup
+            // the panel no longer shows at launch, so a missing permission is told in the Main window
             if first_run || permission().contains("NOT") {
-                open_setup(app.handle());
+                open_main(app.handle(), None);
             }
 
             keys::spawn(tx.clone());

@@ -21,8 +21,16 @@
     border: 1px solid var(--edge); display: flex; flex-direction: column; gap: 10px;
   }
   .hd { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-  .hd h1 { margin: 0; font: 600 13px/1.2 var(--display); letter-spacing: .06em; color: var(--alloc); }
-  .hd span { font: 500 11px var(--mono); color: var(--dim); white-space: nowrap; }
+  .hd h1 { margin: 0; min-width: 0; font: 600 13px/1.2 var(--display); letter-spacing: .06em; color: var(--alloc);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hd span { font: 500 11px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; max-width: 60%; }
+  .hd span b { font-weight: 500; color: var(--ink); }
+  /* something the player must act on: points have stopped ticking, or the hotkey can't work */
+  .banner { display: flex; gap: 7px; padding: 7px 9px; border-radius: 4px; font-size: 11.5px; line-height: 1.4;
+    color: var(--ink); background: rgba(224, 74, 63, .12); border: 1px solid rgba(224, 74, 63, .45); }
+  .banner svg { flex: none; width: 13px; height: 13px; margin-top: 1px; }
+  /* a stopped tracker can't stand behind its Next points, so the tree steps back */
+  svg.stopped { opacity: .35; filter: grayscale(.7); }
   .bar { height: 4px; background: var(--faint); border-radius: 2px; overflow: hidden; }
   .bar i { display: block; height: 100%; background: var(--alloc); }
   svg { display: block; width: 100%; height: auto; touch-action: none; }
@@ -31,11 +39,13 @@
   .hd { cursor: move; user-select: none; -webkit-user-select: none; }
   .meta { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--dim); }
   .meta .refund { color: var(--refund); }
-  .meta .warn { color: var(--refund); }
-  .meta .keys { color: var(--faint); }
+  .meta .note { color: var(--plan); }
+  /* the controls hint: shown on the first few launches, then only while the mouse is on the panel */
+  .meta .keys { display: none; color: var(--dim); }
+  .panel.fresh .meta .keys, .panel:hover .meta .keys { display: block; }
   /* the legend shows each mark as the tree draws it, so no state is told by colour alone */
   .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; }
-  .legend > span, .meta .refund { display: inline-flex; align-items: center; gap: 5px; }
+  .legend > span, .meta .refund, .meta .pending { display: inline-flex; align-items: center; gap: 5px; }
   .meta svg.swatch { display: inline-block; width: 14px; height: 14px; flex: none; }
   .empty { font-size: 12.5px; line-height: 1.5; color: var(--dim); }
   .empty b { color: var(--alloc); }
@@ -55,25 +65,52 @@
   try { cam = MiniTree.camera(Number(localStorage.getItem('zoom'))) } catch {}
   const keepZoom = () => { try { localStorage.setItem('zoom', cam.zoom) } catch {} }
 
+  // drawn, not font glyphs: ⏸ is missing from some system fonts
+  const icon = {
+    pause: '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="2" width="2.5" height="8" rx=".5" fill="var(--refund)"/><rect x="7" y="2" width="2.5" height="8" rx=".5" fill="var(--refund)"/></svg>',
+    warn: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.2 11 10.4H1z" fill="none" stroke="var(--refund)" stroke-width="1.3" stroke-linejoin="round"/><path d="M6 4.6v2.8" stroke="var(--refund)" stroke-width="1.3" stroke-linecap="round"/><circle cx="6" cy="8.9" r=".7" fill="var(--refund)"/></svg>',
+  }
+  const pointsTo = (where) => `Open <b>${where}</b> from the POE Tracker menu bar / tray icon.`
   function render(v) {
     const panel = document.getElementById('panel')
-    const warn = permission.includes('NOT') ? `<span class="warn">⚠ ${esc(permission)}: the hotkey won't work. Allow POE Tracker in System Settings → Privacy &amp; Security → Input Monitoring.</span>` : ''
+    const warn = permission.includes('NOT')
+      ? `<div class="banner">${icon.warn}<span>${esc(permission)}: the hotkey won't work. Allow POE Tracker in System Settings → Privacy &amp; Security → Input Monitoring.</span></div>`
+      : ''
+    if (loadError) {
+      panel.innerHTML = `${warn}<p class="empty"><b>Couldn't load the build.</b> ${esc(loadError.replace(/\.?$/, "."))} Quit POE Tracker from the menu bar / tray icon and open it again.</p>`
+      return
+    }
     if (!v) {
-      panel.innerHTML = `<p class="empty"><b>No build yet.</b> Open <b>Set up build…</b> from the POE Tracker menu bar / tray icon.</p><div class="meta">${warn}</div>`
+      panel.innerHTML = `${warn}<p class="empty"><b>No build yet.</b> ${pointsTo('Set up build…')}</p>`
+      return
+    }
+    if (v.error) {
+      panel.innerHTML = `${warn}<p class="empty"><b>Can't draw ${esc(v.spec)}.</b> ${esc(v.error)} Pick another tree spec in <b>Open tree…</b>, or paste the build again in <b>Set up build…</b></p>`
+      return
+    }
+    if (!v.total) {
+      panel.innerHTML = `${warn}<p class="empty"><b>${esc(v.spec)} has no points to show.</b> Pick another tree spec in <b>Open tree…</b></p>`
       return
     }
     const sw = MiniTree.swatch
     const pending = (v.pending || []).length > 0
-    const refunds = v.refunds.length ? `<span class="refund">${sw('refund')}Refund: ${v.refunds.map(esc).join(', ')}</span>` : '<span>Refund: none</span>'
     const mark = (kind, text) => `<span>${sw(kind)}${text}</span>`
     const legend = v.next.length
-      ? `<div class="legend">${mark('next', `next ${v.next.length}`)}${mark('taken', 'taken')}${v.refunds.length ? mark('refund', 'refund') : ''}${pending ? mark('pending', 'pending refund') : ''}${mark('later', 'later')}${cam.zoom > 1 ? `<span>×${cam.zoom.toFixed(1)}</span>` : ''}</div>`
-      : `<span style="color:var(--alloc)">Spec complete${v.next_spec ? ` — next: ${esc(v.next_spec)}. Switch in Open build…` : ''}</span>`
+      ? `<div class="legend">${mark('next', `next ${v.next.length}`)}${mark('taken', 'taken')}${v.refunds.length ? mark('refund', 'refund') : ''}${pending ? mark('pending', 'pending refund') : ''}${mark('later', 'later')}</div>`
+      : `<span style="color:var(--alloc)">Spec complete${v.next_spec ? ` — next: ${esc(v.next_spec)}. Switch in Open tree…` : ''}</span>`
+    const refunds = v.refunds.length ? `<span class="refund">${sw('refund')}Refund: ${v.refunds.map(esc).join(', ')}</span>` : ''
+    const pendingNote = v.pending_note ? `<span class="pending">${sw('pending')}Pending refund: ${esc(v.pending_note)}</span>` : ''
+    const notes = v.notices.length ? `<span class="note">${v.notices.map(esc).join(' · ')}</span>` : ''
+    const stopped = v.stopped ? `<div class="banner">${icon.pause}<span>${esc(v.stopped)}</span></div>` : ''
+    const who = v.character ? `<b>${esc(v.character)}</b> · ` : ''
+    const zoom = cam.zoom > 1 ? ` · ×${cam.zoom.toFixed(1)}` : ''
+    const tree = MiniTree.draw(v, 392, 0.72, cam)
     panel.innerHTML = `
-      <div class="hd" title="Drag to move the panel"><h1>${esc(v.spec)}</h1><span>${v.done} / ${v.total}</span></div>
+      <div class="hd" title="${esc(v.spec)} · drag to move the panel"><h1>${esc(v.spec)}</h1><span>${who}${v.done} / ${v.total}${zoom}</span></div>
       <div class="bar"><i style="width:${v.total ? 100 * v.done / v.total : 0}%"></i></div>
-      ${MiniTree.draw(v, 392, 0.72, cam)}
-      <div class="meta">${legend}${refunds}${v.notices.map(n => `<span>${esc(n)}</span>`).join('')}${warn}<span class="keys">${hotkey} hide · scroll to zoom, drag to move · drag the title to move the panel</span></div>`
+      ${stopped}${warn}
+      ${v.stopped ? tree.replace('class="minitree', 'class="minitree stopped') : tree}
+      <div class="meta">${legend}${refunds}${pendingNote}${notes}<span class="keys">${hotkey} hide · scroll to zoom, drag to move · drag the title to move the panel</span></div>`
   }
 
   let view = null
@@ -86,8 +123,17 @@
   }).observe(panel)
   invoke('initial_status').then(s => { permission = s.permission; render(view) })
   listen('status', e => { permission = e.payload.permission })
-  invoke('panel_view').then(v => { view = v; render(view) })
-  listen('plan', e => { view = e.payload; render(view) })
+  // the controls hint stays up for the first few launches
+  try {
+    const runs = Number(localStorage.getItem('runs')) || 0
+    localStorage.setItem('runs', runs + 1)
+    if (runs < 3) panel.classList.add('fresh')
+  } catch {}
+  let loaded = false, loadError = ''
+  const failed = why => { loaded = true; loadError = why; render(view) }
+  invoke('panel_view').then(v => { loaded = true; loadError = ''; view = v; render(view) }, e => failed(String(e)))
+  setTimeout(() => { if (!loaded) failed('It is taking too long.') }, 8000)
+  listen('plan', e => { loaded = true; loadError = ''; view = e.payload; render(view) })
   const useBinds = b => { hotkey = KeyLabel.format(b.toggle); render(view) }
   invoke('key_binds').then(useBinds)
   listen('binds', e => useBinds(e.payload))

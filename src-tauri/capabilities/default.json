@@ -3,8 +3,7 @@
   "identifier": "default",
   "windows": [
     "corner",
-    "setup",
-    "build"
+    "main"
   ],
   "permissions": [
     "core:default"

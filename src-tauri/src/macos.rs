@@ -89,7 +89,7 @@ pub fn order_out(win: &WebviewWindow) {
     }
 }
 
-/// Brings the app forward so the Setup window takes keyboard focus. The app runs
+/// Brings the app forward so the Main window takes keyboard focus. The app runs
 /// as an accessory (no Dock icon), which otherwise never becomes active.
 pub fn activate() {
     unsafe {
@@ -98,7 +98,7 @@ pub fn activate() {
     }
 }
 
-/// Shows the Dock icon while the Build window is open (a regular app), and hides
+/// Shows the Dock icon while the Main window is open (a regular app), and hides
 /// it again after (an accessory app).
 pub fn set_dock_icon(shown: bool) {
     unsafe {
