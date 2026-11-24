@@ -8,11 +8,13 @@ Status: unsigned test builds (v0.x) for macOS, Windows and Linux. macOS is the p
 
 - **Main window** (menu bar / tray icon): one ordinary window with a sidebar of sections. The tray's **Open tree…**, **Set up build…** and **Settings…** open it at the matching section.
   - **Tree**: the whole Tree spec large, every point in order (taken ✓, next numbered, then the rest), the Refunds in red, hover details, and the choice of Tree spec.
+  - **Gems**: the Build's Skill set for the current Tree spec beside the gems socketed in your Character's gear (from your public pathofexile.com profile), each marked ✓ had, + missing, ⛓ unlinked (not linked to its group's main skill) or ○ optional, with the gems to − remove listed apart. Pick another Skill set there if the one paired with your Tree spec isn't the one you want.
   - **Build**: paste a PoB code or a pobb.in / pastebin link, pick the Tree spec, and choose the Character. The points it already has are imported from its public pathofexile.com profile, or set by hand as "the first N points". Changes wait for **Save**.
   - **Settings**: Next points, the game log and key binds. Changes save straight away.
   - Problems that stop the app working (Input Monitoring off, ticking paused, `Client.txt` not found) show as a banner across every section, with a button to fix them.
 - **Corner panel**: toggled with ⌥/Alt+P while Path of Exile is in front, and only ever shown inside the game window. Scroll to zoom the Mini-tree, drag to move it, and drag the title to move the panel. It takes the mouse but never the keyboard.
-- **Re-sync character** (tray, or the button at the bottom of the Main window's sidebar, in every section): imports the Character's points again from pathofexile.com.
+- **Re-sync character** (tray, or the button at the bottom of the Main window's sidebar, in every section): imports the Character's points and gems again from pathofexile.com.
+- **Gems stay current by themselves**: they're imported at Save and Re-sync, on area changes (at most once a minute) and when you open the Gems section, so a gem you just socketed shows within a minute or so.
 - **Refunds in game**: the game logs a refund when you click the node, not when you Apply, so the panel marks it as a *Pending refund* and keeps the point. On your next area change the app checks your pathofexile.com profile once to see whether you applied it (or waits for Re-sync if the profile is private).
 
 ## Install a test build
@@ -38,7 +40,7 @@ When a Tree spec is complete the panel names the Build's next spec; switch to it
 
 - Read the log, the clipboard and our own window only. Never read game memory, inject code or edit game files.
 - Never send input to the game. While it's in front, the app takes its own key binds (the panel hotkey, and zoom/pan while the panel is shown) so the game doesn't also act on them; every other key, Esc included, reaches the game untouched.
-- Only the player's own pathofexile.com profile is fetched: at setup, on Re-sync, and once on the area change after a refund click. The only other request is the update check (below).
+- Only the player's own pathofexile.com profile is fetched: its passives at setup, on Re-sync and once on the area change after a refund click; its gear (for the Gems section) at setup, on Re-sync, on area changes at most once a minute and when the Gems section opens. The only other request is the update check (below).
 - **Updates**: from v0.5.4 the app checks this repo's latest release once at launch. If there's a newer one it installs it and restarts right away, or, if the Corner panel is showing, adds **Restart to update** to the tray menu and the Main window's sidebar instead. Updates are signed, and the app refuses any that doesn't match its built-in key.
 
 ## Develop

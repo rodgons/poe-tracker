@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>POE Tracker</title>
 <style>
-  /* Main window: the one app window away from the game, in sections (Tree, Build, Settings). */
+  /* Main window: the one app window away from the game, in sections (Tree, Gems, Build, Settings). */
   :root {
     color-scheme: dark;
     /* Path of Exile's palette: near-black panels, bronze frame, gold for taken points,
@@ -90,6 +90,36 @@
   }
   #tip strong { display: block; color: var(--alloc); margin-bottom: 4px; }
 
+  /* Gems: the Skill set beside the Character's gems. Every mark has an icon and a word,
+     never colour alone: ✓ had, + missing, ⛓ unlinked, − remove, ○ optional */
+  .gemsbody { flex: 1; overflow-y: auto; padding: 16px 20px 28px; }
+  .gemsbody > div { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  .gemsbar .asof { font: 500 12px var(--mono); color: var(--dim); white-space: nowrap; }
+  .gemsbar .asof.old { color: var(--refund); }
+  .tally { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--dim); }
+  .tally b { font-weight: 600; }
+  .gnote { padding: 8px 10px; border-radius: 6px; font-size: 12.5px; background: var(--card); border: 1px solid var(--edge); color: var(--dim); }
+  .gnote.ok { color: var(--alloc); border-color: rgba(217, 180, 90, .45); }
+  .ghead { margin: 8px 2px 0; font: 600 11px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--plan); }
+  .gcard { background: var(--card); border: 1px solid var(--edge); border-radius: 8px; padding: 8px 12px 6px; }
+  .gcard h3 { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 4px; font: 600 13px var(--body); color: var(--ink); }
+  .gcard h3 small { font-weight: 400; color: var(--plan); }
+  .gcard.remove { border-color: rgba(224, 74, 63, .45); }
+  .grow { display: grid; grid-template-columns: 96px 1fr auto auto; gap: 10px; align-items: baseline; padding: 3px 0; border-top: 1px solid var(--other); }
+  .grow:first-of-type { border-top: 0; }
+  .grow .gname small { color: var(--plan); }
+  .grow .lv { font: 500 11.5px var(--mono); color: var(--dim); text-align: right; min-width: 64px; }
+  .grow .lv.head { font: 600 10.5px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--plan); }
+  .mark { font: 600 12px var(--body); white-space: nowrap; }
+  .mark i { font-style: normal; display: inline-block; width: 16px; text-align: center; }
+  .mark.had { color: var(--alloc); }
+  .mark.missing { color: var(--next); }
+  .mark.unlinked { color: #e09a4f; }
+  .mark.remove { color: var(--refund); }
+  .mark.optional { color: var(--plan); }
+  .grow.optional .gname { color: var(--dim); }
+  .grow.support .gname { padding-left: 12px; }
+
   /* Build and Settings: forms in a readable column */
   .form { flex: 1; overflow-y: auto; padding: 22px 24px 32px; }
   .form > div { max-width: 580px; margin: 0 auto; }
@@ -136,6 +166,7 @@
 <nav>
   <p class="brand">POE Tracker</p>
   <button class="go" data-go="tree">Tree</button>
+  <button class="go" data-go="gems">Gems</button>
   <button class="go" data-go="build">Build <i class="dot" id="draftDot" hidden title="Not saved"></i></button>
   <button class="go" data-go="settings">Settings</button>
   <footer>
@@ -150,6 +181,8 @@
   <div id="banners"></div>
 
   <section class="view" id="tree" hidden><p class="empty">Loading…</p></section>
+
+  <section class="view" id="gems" hidden><p class="empty">Loading…</p></section>
 
   <section class="view" id="build" hidden>
     <div class="form"><div>
@@ -216,7 +249,7 @@
   let binds = null
 
   // ---- sections ----
-  const names = { tree: 'Tree', build: 'Build', settings: 'Settings' }
+  const names = { tree: 'Tree', gems: 'Gems', build: 'Build', settings: 'Settings' }
   let current = null
   function show(name) {
     if (!names[name]) return
@@ -226,6 +259,7 @@
     document.title = `POE Tracker · ${names[name]}`
     remember('section', name)
     if (name === 'tree') drawTree()
+    if (name === 'gems') { loadGems(); invoke('refresh_gems') }
   }
   document.querySelectorAll('nav button.go').forEach(b => b.onclick = () => show(b.dataset.go))
   // the tray opens a given section; without one, Build until a build is saved, then the last used
@@ -330,6 +364,77 @@
     box.style.left = `${x}px`; box.style.top = `${y}px`
   }
   new ResizeObserver(drawTree).observe(document.body)
+
+  // ---- Gems ----
+  let gems = null
+  const marks = {
+    had: ['✓', 'Had'], missing: ['+', 'Missing'], unlinked: ['⛓', 'Unlinked'],
+    remove: ['−', 'Remove'], optional: ['○', 'Optional'],
+  }
+  const mark = st => `<span class="mark ${st}"><i aria-hidden="true">${marks[st][0]}</i>${marks[st][1]}</span>`
+  const lq = (l, q) => l == null ? '—' : `${l}/${q}`
+  function ago(secs) {
+    const m = Math.floor((Date.now() / 1000 - secs) / 60)
+    return m < 1 ? 'just now' : m === 1 ? '1 min ago' : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ago`
+  }
+  const loadGems = () => invoke('gems_view').then(v => { gems = v; renderGems() })
+
+  function renderGems() {
+    const el = $('gems')
+    if (current !== 'gems') return
+    const v = gems
+    if (!v) {
+      el.innerHTML = '<p class="empty"><b>No build yet.</b><br>Paste your Path of Building build in the Build section.<br><button data-go="build">Go to Build</button></p>'
+      return
+    }
+    const how = v.chosen === 'paired' ? `goes with ${v.spec}` : v.chosen === 'active' ? `no Skill set pairs with ${v.spec}: the build's own` : 'picked by you'
+    const options = v.skill_sets.map((t, i) => `<option value="${i}"${i === v.skill_set ? ' selected' : ''}>${esc(t)}</option>`).join('')
+    const follow = v.chosen === 'picked' ? '<button class="ghost" id="followSpec" style="padding:5px 10px;font-size:12px">Follow Tree spec</button>' : ''
+    const asof = v.busy ? 'Importing gems…' : v.as_of ? `Gems as of ${ago(v.as_of)}` : ''
+    const old = v.as_of && Date.now() / 1000 - v.as_of > 600
+    const top = `<div class="treebar gemsbar">
+      ${v.character ? `<span class="who">${esc(v.character)}</span>` : ''}
+      ${v.skill_sets.length ? `<select id="skillSet" aria-label="Skill set">${options}</select><span class="who" style="font-size:12px">${esc(how)}</span>` : ''}
+      ${follow}<span style="flex:1"></span><span class="asof${old ? ' old' : ''}" title="Gems come from your pathofexile.com profile">${asof}</span></div>`
+    const c = v.comparison
+    const groups = c ? c.groups : v.groups
+    const parts = []
+    if (v.notice) parts.push(`<p class="gnote">${esc(v.notice)}</p>`)
+    if (c) {
+      const n = c.counts
+      parts.push(n.missing + n.unlinked + n.remove === 0
+        ? `<p class="gnote ok">${mark('had')} All gems match this Skill set.</p>`
+        : `<div class="tally">${mark('missing')}<b>${n.missing}</b>${mark('unlinked')}<b>${n.unlinked}</b>${mark('remove')}<b>${n.remove}</b></div>`)
+    }
+    for (const g of groups) {
+      if (g.heading) { parts.push(`<p class="ghead">${esc(g.title)}</p>`); continue }
+      const rows = g.gems.map(r => {
+        const st = r.status === 'optional' ? 'optional' : r.status
+        const name = esc(r.name) + (r.have_name ? ` <small>(${esc(r.have_name)})</small>` : '')
+        const shown = c ? mark(st) + (st === 'optional' && r.socketed ? ' <small class="hint" style="margin:0">socketed</small>' : '') : (r.status === 'optional' ? mark('optional') : '')
+        return `<div class="grow${r.support ? ' support' : ''}${st === 'optional' ? ' optional' : ''}"><span>${shown}</span><span class="gname">${name}</span>
+          <span class="lv">${lq(r.want_level, r.want_quality)}</span><span class="lv">${c ? lq(r.have_level, r.have_quality) : ''}</span></div>`
+      }).join('')
+      parts.push(`<div class="gcard"><h3><span>${esc(g.title)}</span><small>${esc(g.slot)}</small></h3>
+        <div class="grow"><span></span><span></span><span class="lv head">Build</span><span class="lv head">${c ? 'Yours' : ''}</span></div>${rows}</div>`)
+    }
+    if (c && c.remove.length) {
+      parts.push(`<div class="gcard remove"><h3><span>Remove</span><small>socketed, not in this Skill set</small></h3>${c.remove.map(x =>
+        `<div class="grow"><span>${mark('remove')}</span><span class="gname">${esc(x.name)} <small>· ${esc(x.slot)}</small></span><span class="lv"></span><span class="lv">${lq(x.level, x.quality)}</span></div>`).join('')}</div>`)
+    }
+    const scrolled = el.querySelector('.gemsbody')?.scrollTop ?? 0
+    el.innerHTML = `${top}<div class="gemsbody"><div>${parts.join('')}</div></div>`
+    el.querySelector('.gemsbody').scrollTop = scrolled
+    if ($('skillSet')) $('skillSet').onchange = () => invoke('set_skill_set', { skillSet: Number($('skillSet').value) })
+    if ($('followSpec')) $('followSpec').onclick = () => invoke('set_skill_set', { skillSet: null })
+  }
+  $('gems').addEventListener('click', e => { const go = e.target.closest('[data-go]'); if (go) show(go.dataset.go) })
+  listen('gems', loadGems)
+  // "as of" keeps counting while the section is open
+  setInterval(() => {
+    const el = current === 'gems' && !gems?.busy && gems?.as_of && document.querySelector('#gems .asof')
+    if (el) { el.textContent = `Gems as of ${ago(gems.as_of)}`; el.classList.toggle('old', Date.now() / 1000 - gems.as_of > 600) }
+  }, 30000)
 
   // ---- Build ----
   // a draft: anything changed here and not saved yet. While there is one, what the
@@ -558,7 +663,7 @@
   // ---- load ----
   const loadTree = () => invoke('build_view').then(d => { data = d; renderTree(); banners() })
   // any change to the plan (a tick, a re-sync, a new spec, new settings) reloads what shows it
-  listen('plan', () => { loadTree(); loadSetup(false) })
+  listen('plan', () => { loadTree(); loadSetup(false); if (current === 'gems') loadGems() })
   listen('binds', e => { binds = e.payload; showBinds() })
   listen('status', e => { if (e.payload.permission !== permission) { permission = e.payload.permission; banners() } })
 

@@ -6,6 +6,9 @@ use std::io::Read;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Spec {
     pub title: String,
+    /// the title as PoB wrote it, colour codes and all, for pairing with a Skill set
+    #[serde(default)]
+    pub raw_title: String,
     pub tree_version: String,
     pub class_id: u32,
     pub nodes: Vec<u32>,
@@ -18,6 +21,42 @@ pub struct Build {
     pub specs: Vec<Spec>,
     /// index into `specs` of the spec the build was saved on
     pub active: usize,
+    /// the Build's Skill sets; empty in builds saved before v0.6
+    #[serde(default)]
+    pub skill_sets: Vec<SkillSet>,
+    /// index into `skill_sets` of the set the build was saved on
+    #[serde(default)]
+    pub active_skill_set: usize,
+}
+
+/// One of the Build's named sets of gems, for one stage of the Build.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SkillSet {
+    /// the title as PoB wrote it (colour codes kept, for pairing)
+    pub title: String,
+    pub groups: Vec<Group>,
+}
+
+/// A socket group: gems meant to be linked together, or a label-only heading.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Group {
+    pub label: String,
+    pub slot: String,
+    pub enabled: bool,
+    /// made by PoB from an item, the tree or config (`source`), not gems to socket
+    pub granted: bool,
+    pub gems: Vec<Gem>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Gem {
+    /// the gem's name as PoB shows it, without " Support"
+    pub name: String,
+    pub support: bool,
+    pub level: u32,
+    pub quality: u32,
+    /// off in PoB: the author's optional pick
+    pub enabled: bool,
 }
 
 /// Turns what the player pasted into a raw build code, fetching links.
@@ -72,8 +111,10 @@ pub fn parse(xml: &str) -> Result<Build, String> {
         let Some(nodes) = s.attribute("nodes") else {
             return Err("This build is too old: open it in Path of Building and re-export.".into());
         };
+        let raw = s.attribute("title").unwrap_or("Tree");
         specs.push(Spec {
-            title: clean_title(s.attribute("title").unwrap_or("Tree")),
+            title: clean_title(raw),
+            raw_title: raw.to_string(),
             tree_version: s.attribute("treeVersion").unwrap_or("").to_string(),
             class_id: s.attribute("classId").and_then(|c| c.parse().ok()).unwrap_or(0),
             nodes: nodes.split(',').filter_map(|n| n.trim().parse().ok()).collect(),
@@ -88,7 +129,55 @@ pub fn parse(xml: &str) -> Result<Build, String> {
         .and_then(|a| a.parse::<usize>().ok())
         .map(|a| a.saturating_sub(1).min(specs.len() - 1))
         .unwrap_or(0);
-    Ok(Build { specs, active })
+    let (skill_sets, active_skill_set) = parse_skills(&doc);
+    Ok(Build { specs, active, skill_sets, active_skill_set })
+}
+
+/// `<Skills activeSkillSet=id>` › `<SkillSet id title>` › `<Skill>` › `<Gem>`. Builds from
+/// before PoB had Skill sets keep their `<Skill>`s straight under `<Skills>`: one set.
+fn parse_skills(doc: &roxmltree::Document) -> (Vec<SkillSet>, usize) {
+    let Some(skills) = doc.descendants().find(|n| n.has_tag_name("Skills")) else { return (Vec::new(), 0) };
+    let flag = |n: roxmltree::Node, a: &str| n.attribute(a).is_none_or(|v| v != "false");
+    let num = |n: roxmltree::Node, a: &str| n.attribute(a).and_then(|v| v.trim().parse::<u32>().ok()).unwrap_or(0);
+    let groups = |set: roxmltree::Node| -> Vec<Group> {
+        set.children()
+            .filter(|n| n.has_tag_name("Skill"))
+            .map(|g| Group {
+                label: g.attribute("label").unwrap_or("").to_string(),
+                slot: g.attribute("slot").unwrap_or("").to_string(),
+                enabled: flag(g, "enabled"),
+                granted: g.attribute("source").is_some(),
+                gems: g
+                    .children()
+                    .filter(|n| n.has_tag_name("Gem"))
+                    .filter_map(|gem| {
+                        let skill_id = gem.attribute("skillId").unwrap_or("");
+                        let name = gem.attribute("nameSpec").filter(|n| !n.is_empty()).unwrap_or(skill_id);
+                        (!name.is_empty()).then(|| Gem {
+                            name: name.trim_end_matches(" Support").to_string(),
+                            support: gem.attribute("gemId").unwrap_or("").contains("SupportGem")
+                                || skill_id.starts_with("Support"),
+                            level: num(gem, "level"),
+                            quality: num(gem, "quality"),
+                            enabled: flag(gem, "enabled"),
+                        })
+                    })
+                    .collect(),
+            })
+            .collect()
+    };
+    let sets: Vec<_> = skills.children().filter(|n| n.has_tag_name("SkillSet")).collect();
+    if sets.is_empty() {
+        let only = groups(skills);
+        return if only.is_empty() { (Vec::new(), 0) } else { (vec![SkillSet { title: "Default".into(), groups: only }], 0) };
+    }
+    let active = skills.attribute("activeSkillSet");
+    let index = sets.iter().position(|s| s.attribute("id") == active).unwrap_or(0);
+    let out = sets
+        .iter()
+        .map(|s| SkillSet { title: s.attribute("title").unwrap_or("Default").to_string(), groups: groups(*s) })
+        .collect();
+    (out, index)
 }
 
 /// "{48385,12345},{...}" → [(48385, 12345), ...]
@@ -102,7 +191,7 @@ fn parse_masteries(s: &str) -> Vec<(u32, u32)> {
 }
 
 /// Strips PoB colour codes (^1, ^xRRGGBB) from spec titles.
-fn clean_title(t: &str) -> String {
+pub fn clean_title(t: &str) -> String {
     let mut out = String::new();
     let mut chars = t.chars().peekable();
     while let Some(c) = chars.next() {
@@ -142,6 +231,32 @@ mod tests {
         assert_eq!(s.tree_version, "3_29");
         assert_eq!(s.class_id, 1);
         assert_eq!(b.specs[0].title, "CHECK POB NOTES FOR INFORMATION");
+    }
+
+    #[test]
+    fn reads_the_skill_sets() {
+        let b = decode(POHX).unwrap();
+        assert_eq!(b.skill_sets.len(), 8);
+        assert_eq!(clean_title(&b.skill_sets[b.active_skill_set].title), "Level 1-30 {1}");
+        let first = &b.skill_sets[0];
+        let slam = first.groups.iter().find(|g| g.label == "Ground Slam").unwrap();
+        assert_eq!(slam.gems[0], Gem { name: "Ground Slam".into(), support: false, level: 9, quality: 0, enabled: true });
+        assert!(slam.gems[1].support);
+        assert!(first.groups.iter().any(|g| g.gems.is_empty()), "label-only groups are kept as headings");
+    }
+
+    #[test]
+    fn reads_flat_skills_and_granted_groups() {
+        let xml = r#"<PathOfBuilding><Tree activeSpec="1"><Spec nodes="1"/></Tree><Skills>
+            <Skill label="" enabled="true"><Gem nameSpec="Cleave" skillId="Cleave" gemId="Metadata/Items/Gems/SkillGemCleave" level="20" quality="20"/>
+              <Gem nameSpec="Melee Physical Damage" skillId="SupportMeleePhysicalDamage" enabled="false" level="1"/></Skill>
+            <Skill source="Item:3:Some Ring" enabled="true"><Gem skillId="Curse"/></Skill></Skills></PathOfBuilding>"#;
+        let b = parse(xml).unwrap();
+        assert_eq!(b.skill_sets.len(), 1);
+        let g = &b.skill_sets[0].groups;
+        assert_eq!(g[0].gems[0].quality, 20);
+        assert!(g[0].gems[1].support && !g[0].gems[1].enabled);
+        assert!(g[1].granted);
     }
 
     #[test]

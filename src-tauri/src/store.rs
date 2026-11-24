@@ -23,6 +23,8 @@ pub struct Saved {
     pub panel_spot: Option<(f64, f64)>,
     /// the keys the hook listens for
     pub binds: Binds,
+    /// the Skill set the player picked in the Gems section; None follows the Tree spec
+    pub skill_set: Option<usize>,
 }
 
 impl Default for Saved {
@@ -38,6 +40,7 @@ impl Default for Saved {
             log_path: None,
             panel_spot: None,
             binds: Binds::default(),
+            skill_set: None,
         }
     }
 }

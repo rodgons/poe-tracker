@@ -17,6 +17,7 @@ use tauri::{
 mod clientlog;
 mod foreground;
 mod gamewin;
+mod gems;
 mod keys;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -48,7 +49,25 @@ struct App {
     refund_unchecked: bool,
     /// a downloaded update's version, waiting for a restart
     update_ready: Option<String>,
+    /// the Character's socketed gems from the last items import
+    gems: Gems,
 }
+
+/// The last items import from pathofexile.com, and when it can run again.
+#[derive(Default)]
+struct Gems {
+    owned: Option<Vec<poeapi::OwnedGem>>,
+    /// seconds since 1970 when `owned` was imported
+    at: Option<u64>,
+    /// why the last import failed
+    error: Option<String>,
+    busy: bool,
+    tried: Option<std::time::Instant>,
+}
+
+/// Imports at most this often, unless the player asked (Save, Re-sync): get-items allows
+/// 90 requests per 30 minutes per IP.
+const GEMS_EVERY: Duration = Duration::from_secs(60);
 
 impl App {
     /// Ticking pauses while the log shows a different character playing.
@@ -128,6 +147,162 @@ fn permission() -> &'static str {
     return macos::listen_permission();
     #[cfg(not(target_os = "macos"))]
     return "not needed";
+}
+
+/// Imports the Character's gems in the background. `asked` (Save, Re-sync) skips the
+/// throttle; area changes and opening the Gems section don't.
+fn import_gems(handle: &AppHandle, asked: bool) {
+    let job = {
+        let st = handle.state::<AppState>();
+        let mut st = st.lock().unwrap();
+        let s = &st.saved;
+        let ready = s.build.is_some() && !s.account.is_empty() && !s.character.is_empty();
+        let recent = st.gems.tried.is_some_and(|t| t.elapsed() < GEMS_EVERY);
+        if !ready || st.gems.busy || (recent && !asked) {
+            None
+        } else {
+            let job = (s.account.clone(), s.character.clone());
+            st.gems.busy = true;
+            st.gems.tried = Some(std::time::Instant::now());
+            Some(job)
+        }
+    };
+    let Some((account, character)) = job else { return };
+    let _ = handle.emit("gems", ());
+    let app = handle.clone();
+    std::thread::spawn(move || {
+        let got = poeapi::items(&account, &character);
+        let st = app.state::<AppState>();
+        let mut st = st.lock().unwrap();
+        st.gems.busy = false;
+        // the Character changed while importing: this answer is someone else's
+        if st.saved.character != character || st.saved.account != account {
+            return;
+        }
+        match got {
+            Ok(owned) => {
+                st.gems.owned = Some(owned);
+                st.gems.at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs());
+                st.gems.error = None;
+            }
+            Err(e) => st.gems.error = Some(e),
+        }
+        drop(st);
+        let _ = app.emit("gems", ());
+    });
+}
+
+/// What the Gems section (and later the Gem panel) shows.
+#[derive(Serialize)]
+struct GemsView {
+    skill_sets: Vec<String>,
+    skill_set: Option<usize>,
+    chosen: Option<gems::Chosen>,
+    spec: String,
+    character: String,
+    /// None until an import has worked
+    comparison: Option<gems::Comparison>,
+    /// the Skill set alone, when there's nothing to compare against
+    groups: Vec<gems::GroupRow>,
+    as_of: Option<u64>,
+    busy: bool,
+    /// why gems can't be compared (no account, private profile…)
+    notice: Option<String>,
+}
+
+fn gems_view_of(app: &App) -> Option<GemsView> {
+    let s = &app.saved;
+    let build = s.build.as_ref()?;
+    let spec = build.specs.get(s.spec)?;
+    let chosen = gems::choose(build, s.spec, s.skill_set);
+    let set = chosen.and_then(|(i, _)| build.skill_sets.get(i));
+    let comparison = match (set, &app.gems.owned) {
+        (Some(set), Some(owned)) => Some(gems::compare(set, owned)),
+        _ => None,
+    };
+    let groups = match (set, &comparison) {
+        (Some(set), None) => gems::compare(set, &[]).groups,
+        _ => Vec::new(),
+    };
+    let notice = if build.skill_sets.is_empty() {
+        Some("This build has no gems. Paste it again in Build if it was saved before v0.6.".into())
+    } else if s.account.is_empty() {
+        Some("Add your pathofexile.com account in Build to compare your gems.".into())
+    } else {
+        app.gems.error.as_ref().map(|e| {
+            if e.contains("private") {
+                "Make your Characters tab public on pathofexile.com (My Account → Privacy) to compare your gems.".to_string()
+            } else {
+                format!("Couldn't import your gems: {e}")
+            }
+        })
+    };
+    Some(GemsView {
+        skill_sets: build.skill_sets.iter().map(|t| pob::clean_title(&t.title)).collect(),
+        skill_set: chosen.map(|(i, _)| i),
+        chosen: chosen.map(|(_, c)| c),
+        spec: spec.title.clone(),
+        character: s.character.clone(),
+        comparison,
+        groups,
+        as_of: app.gems.at,
+        busy: app.gems.busy,
+        notice,
+    })
+}
+
+#[tauri::command]
+fn gems_view(state: State<'_, AppState>) -> Option<GemsView> {
+    gems_view_of(&state.lock().unwrap())
+}
+
+/// The Gems section opened: import again if the last import is over a minute old.
+#[tauri::command]
+fn refresh_gems(app: AppHandle) {
+    import_gems(&app, false);
+}
+
+/// The player's Skill set pick; None follows the Tree spec again.
+#[tauri::command]
+fn set_skill_set(skill_set: Option<usize>, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut st = state.lock().unwrap();
+    st.saved.skill_set = skill_set;
+    store::save(&st.path, &st.saved)?;
+    drop(st);
+    let _ = app.emit("gems", ());
+    Ok(())
+}
+
+/// Builds saved before v0.6 kept only their trees: read the pasted build again for its
+/// Skill sets (and the raw spec titles that pair with them).
+fn upgrade_build(handle: AppHandle) {
+    let input = {
+        let st = handle.state::<AppState>();
+        let st = st.lock().unwrap();
+        match &st.saved.build {
+            Some(b) if b.skill_sets.is_empty() && !st.saved.input.is_empty() => st.saved.input.clone(),
+            _ => return,
+        }
+    };
+    std::thread::spawn(move || {
+        let Ok(fresh) = pob::code_from_input(&input).and_then(|c| pob::decode(&c)) else { return };
+        let st = handle.state::<AppState>();
+        let mut st = st.lock().unwrap();
+        if st.saved.input != input {
+            return;
+        }
+        let Some(build) = st.saved.build.as_mut() else { return };
+        if build.specs.len() == fresh.specs.len() {
+            for (old, new) in build.specs.iter_mut().zip(&fresh.specs) {
+                old.raw_title = new.raw_title.clone();
+            }
+        }
+        build.skill_sets = fresh.skill_sets;
+        build.active_skill_set = fresh.active_skill_set;
+        let _ = store::save(&st.path, &st.saved);
+        drop(st);
+        let _ = handle.emit("gems", ());
+    });
 }
 
 fn place_in_corner(win: &WebviewWindow) {
@@ -374,6 +549,9 @@ fn on_log_line(handle: &AppHandle, line: &str) {
             }
         }
         clientlog::Event::Entered => {
+            // the log handler holds the state: import once it lets go
+            let h = handle.clone();
+            std::thread::spawn(move || import_gems(&h, false));
             let s = &app.saved;
             let spec = s.build.as_ref().and_then(|b| b.specs.get(s.spec));
             if let Some(spec) = spec.filter(|_| !app.refunding.is_empty() && !app.refund_unchecked && !s.account.is_empty()) {
@@ -578,9 +756,18 @@ async fn save_setup(
     };
     let mut guard = state.lock().unwrap();
     let st = &mut *guard;
+    let new_build = st.pending.is_some();
     if let Some((input, build)) = st.pending.take() {
         st.saved.input = input;
         st.saved.build = Some(build);
+    }
+    // a new Build or Tree spec follows its paired Skill set again
+    if new_build || spec != st.saved.spec {
+        st.saved.skill_set = None;
+    }
+    // another Character's gems aren't this one's
+    if character != st.saved.character || account != st.saved.account {
+        st.gems = Gems::default();
     }
     st.saved.spec = spec;
     st.saved.account = account;
@@ -593,6 +780,9 @@ async fn save_setup(
     st.synced = None;
     store::save(&st.path, &st.saved)?;
     let _ = app.emit("plan", panel_view_of(st));
+    drop(guard);
+    let _ = app.emit("gems", ());
+    import_gems(&app, true);
     Ok(())
 }
 
@@ -655,6 +845,9 @@ fn resync(app: &AppHandle) {
             _ => None,
         }
     };
+    if job.is_some() {
+        import_gems(app, true);
+    }
     let Some((account, character, spec)) = job else {
         let has_build = app.state::<AppState>().lock().unwrap().saved.build.is_some();
         if has_build {
@@ -776,6 +969,7 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
     let mut st = state.lock().unwrap();
     let title = st.saved.build.as_ref().and_then(|b| b.specs.get(spec)).ok_or("No such tree spec.")?.title.clone();
     st.saved.spec = spec;
+    st.saved.skill_set = None;
     // a hand Seed only counted the old spec's points; an import holds them all
     st.synced = st
         .saved
@@ -784,10 +978,11 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
         .then(|| format!("Switched to {title}: Re-sync character so your taken points count"));
     store::save(&st.path, &st.saved)?;
     let _ = app.emit("plan", panel_view_of(&st));
+    let _ = app.emit("gems", ());
     Ok(())
 }
 
-/// Shows the Main window, at `section` ("tree", "build" or "settings") when given;
+/// Shows the Main window, at `section` ("tree", "gems", "build" or "settings") when given;
 /// otherwise the page picks (Build until a build is saved, then the last section used).
 fn open_main(app: &AppHandle, section: Option<&str>) {
     let Some(win) = app.get_webview_window("main") else { return };
@@ -902,6 +1097,9 @@ pub fn run() {
             set_spec,
             set_points,
             resync_character,
+            gems_view,
+            refresh_gems,
+            set_skill_set,
             app_info,
             restart_to_update,
             open_input_monitoring
@@ -911,7 +1109,8 @@ pub fn run() {
             let saved = store::load(&path);
             keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default() }));
+            upgrade_build(app.handle().clone());
 
             #[cfg(target_os = "macos")]
             {
