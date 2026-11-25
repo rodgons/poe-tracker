@@ -52,8 +52,8 @@ struct App {
     update_ready: Option<String>,
     /// the Character's socketed gems from the last items import
     gems: Gems,
-    /// the level of the area the player is in, from the log
-    area_level: Option<u32>,
+    /// the area the player is in and its level, from the log
+    area: Option<(String, u32)>,
 }
 
 /// The last items import from pathofexile.com, and when it can run again.
@@ -636,13 +636,14 @@ fn on_log_line(handle: &AppHandle, line: &str) {
             }
         }
         clientlog::Event::Entered { area, level } => {
-            app.area_level = Some(level);
+            app.area = Some((area.clone(), level));
             // the log handler holds the state: import once it lets go
             let h = handle.clone();
             std::thread::spawn(move || import_gems(&h, false));
             let progress = app.saved.guide_progress();
-            let steps = guide::steps(guide::route(), &progress.options);
-            let step = guide::advance(&steps, progress.step, &area);
+            let route = guide::route();
+            let steps = guide::steps(route, &progress.options);
+            let step = guide::advance(&steps, progress.step, &area, route.is_town(&area));
             if step != progress.step {
                 app.saved.guide_mut().step = step;
                 let _ = store::save(&app.path, &app.saved);
@@ -1056,7 +1057,7 @@ struct GuideView {
     /// the Character's level and the area levels that give it full experience, when known
     level: Option<u32>,
     full_exp: Option<(u32, u32)>,
-    /// the level of the area the player is in, since the app started
+    /// the level of the zone the player is in (None in towns and hideouts)
     area_level: Option<u32>,
     /// the Build has gems the guide can pick (false: no Build, or no gem the route gives)
     gems: bool,
@@ -1072,11 +1073,14 @@ fn guide_view(state: State<'_, AppState>) -> GuideView {
     if let Some(plan) = &plan {
         guide::pick_gems(route, &mut steps, plan);
     }
-    // before the first area change since the app started: the area the last step entered
-    let area_level = st.area_level.or_else(|| {
-        let last = steps.get(progress.step.checked_sub(1)?)?.to.as_deref()?;
-        route.areas.get(last).map(|a| a.level)
+    // before the first area change since the app started: the area the last step entered.
+    // None in towns and hideouts, which give no experience to judge.
+    let area = st.area.clone().or_else(|| {
+        let last = steps.get(progress.step.checked_sub(1)?)?.to.clone()?;
+        let level = route.areas.get(&last)?.level;
+        Some((last, level))
     });
+    let area_level = area.filter(|(id, _)| !route.is_town(id)).map(|(_, level)| level);
     GuideView {
         step: progress.step.min(steps.len()),
         steps,
@@ -1342,7 +1346,7 @@ pub fn run() {
             let saved = store::load(&path);
             keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default(), area_level: None }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default(), area: None }));
             upgrade_build(app.handle().clone());
 
             #[cfg(target_os = "macos")]

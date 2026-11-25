@@ -27,6 +27,7 @@ pub struct Area {
     pub name: String,
     /// the monster level, which sets the experience penalty
     pub level: u32,
+    pub town: bool,
 }
 
 /// What one way of finishing a quest offers: a gem to take as the reward (by the
@@ -314,17 +315,29 @@ pub fn full_exp(level: u32) -> (u32, u32) {
     (level.saturating_sub(margin).max(1), level + margin)
 }
 
-/// Where the guide goes when the Character enters `area` while on step `current`: past
-/// the nearest step from `current` on whose target it is, counting the steps between as
-/// done. Any other area (a town, the hideout, an earlier zone) leaves it where it is.
-/// `steps.len()` means the campaign is done.
-pub fn advance(steps: &[Step], current: usize, area: &str) -> usize {
-    steps
-        .iter()
-        .enumerate()
-        .skip(current)
-        .find(|(_, s)| s.to.as_deref() == Some(area))
-        .map_or(current, |(i, _)| i + 1)
+impl Route {
+    /// Towns and hideouts: places the player goes back to between zones.
+    pub fn is_town(&self, area: &str) -> bool {
+        self.areas.get(area).is_some_and(|a| a.town) || area.starts_with("Hideout")
+    }
+}
+
+/// Where the guide goes when the Character enters `area` (a `town` or not) while on step
+/// `current`. The current step's target moves it to the next step; a later step's target
+/// skips ahead past it, counting the steps between as done. A town, or a zone some earlier
+/// step already entered, only counts as the current step's target: the route sends the
+/// player back to town to hand in quests and back through zones it has passed, and those
+/// trips mustn't skip to the step that enters them again later. Anywhere else leaves it
+/// where it is. `steps.len()` means the campaign is done.
+pub fn advance(steps: &[Step], current: usize, area: &str, town: bool) -> usize {
+    let targets = |s: &Step| s.to.as_deref() == Some(area);
+    if steps.get(current).is_some_and(targets) {
+        return current + 1;
+    }
+    if town || steps[..current.min(steps.len())].iter().any(targets) {
+        return current;
+    }
+    steps.iter().enumerate().skip(current).find(|(_, s)| targets(s)).map_or(current, |(i, _)| i + 1)
 }
 
 /// The step in `after` matching step `current` of `before`, when the switches change and
@@ -476,22 +489,37 @@ mod tests {
 
     #[test]
     fn entering_the_target_moves_to_the_next_step() {
-        assert_eq!(advance(&mini(), 0, "a"), 1);
-        assert_eq!(advance(&mini(), 1, "b"), 2);
+        assert_eq!(advance(&mini(), 0, "a", false), 1);
+        assert_eq!(advance(&mini(), 1, "b", false), 2);
+        assert_eq!(advance(&mini(), 2, "town", true), 3);
     }
 
     #[test]
     fn a_later_area_skips_ahead_and_nothing_moves_back() {
         // skipping c's step: entering d jumps past it
-        assert_eq!(advance(&mini(), 1, "d"), 6);
+        assert_eq!(advance(&mini(), 1, "d", false), 6);
         // back in an earlier zone: stays put
-        assert_eq!(advance(&mini(), 3, "a"), 3);
-        // b is entered twice; from step 3 on only the later b counts
-        assert_eq!(advance(&mini(), 3, "b"), 5);
+        assert_eq!(advance(&mini(), 3, "a", false), 3);
+        // b is entered twice: going back to it before c stays put, the second time counts on its own step
+        assert_eq!(advance(&mini(), 3, "b", false), 3);
+        assert_eq!(advance(&mini(), 4, "b", false), 5);
+        // a trip to town never skips to the step that enters it later
+        assert_eq!(advance(&mini(), 1, "town", true), 1);
         // an area the route never enters (the hideout)
-        assert_eq!(advance(&mini(), 2, "HideoutFelled"), 2);
+        assert_eq!(advance(&mini(), 2, "HideoutFelled", true), 2);
         // the campaign done
-        assert_eq!(advance(&mini(), 6, "d"), 6);
+        assert_eq!(advance(&mini(), 6, "d", false), 6);
+    }
+
+    #[test]
+    fn a_logout_in_act_10_stays_on_its_step() {
+        // the route logs out to Oriath Docks to hand in quests long before the step that enters it
+        let r = route();
+        let s = steps(r, &Options::default());
+        let docks = s.iter().position(|s| s.to.as_deref() == Some("2_10_town")).unwrap();
+        let earlier = (0..docks).rev().find(|&i| s[i].act == 10 && s[i].lines.iter().any(|l| l.parts.iter().any(|p| p.kind == "logout"))).unwrap();
+        assert_eq!(advance(&s, earlier, "2_10_town", r.is_town("2_10_town")), earlier);
+        assert!(r.is_town("HideoutFelled") && !r.is_town("2_10_1"));
     }
 
     #[test]
@@ -514,7 +542,7 @@ mod tests {
     #[test]
     fn a_new_character_catches_up_on_its_first_campaign_area() {
         // no progress yet: the first area entered lands right after its first step
-        assert_eq!(advance(&mini(), 0, "c"), 4);
+        assert_eq!(advance(&mini(), 0, "c", false), 4);
     }
 }
 
@@ -539,5 +567,35 @@ mod build_tests {
         let got: Vec<String> = s.iter().flat_map(|s| s.lines.iter().flat_map(move |l| l.gems.iter().map(move |g| format!("A{} {} {} ({})", s.act, if g.buy { "$" } else { "★" }, g.name, g.npc)))).collect();
         assert!(got[0].starts_with("A1 ★"), "{got:?}");
         assert!(got.iter().any(|g| g.contains("Righteous Fire")), "{got:?}");
+    }
+}
+
+#[cfg(test)]
+mod walk_tests {
+    use super::*;
+
+    #[test]
+    fn walking_the_route_with_town_trips_moves_one_step_at_a_time() {
+        let r = route();
+        for options in [Options::default(), Options { league_start: false, bandit: Bandit::Alira }] {
+            let s = steps(r, &options);
+            let towns: Vec<&str> = r.areas.iter().filter(|(_, a)| a.town).map(|(id, _)| id.as_str()).collect();
+            let mut at = 0;
+            while at < s.len() - 1 {
+                // a trip to any town, and back into a zone already passed, changes nothing
+                for t in towns.iter().filter(|t| s[at].to.as_deref() != Some(**t)) {
+                    assert_eq!(advance(&s, at, t, true), at, "town {t} on step {at}");
+                }
+                if at > 0 {
+                    let back = s[at - 1].to.as_deref().unwrap();
+                    if s[at].to.as_deref() != Some(back) {
+                        assert_eq!(advance(&s, at, back, r.is_town(back)), at, "back to {back} on step {at}");
+                    }
+                }
+                let to = s[at].to.as_deref().unwrap();
+                assert_eq!(advance(&s, at, to, r.is_town(to)), at + 1, "step {at}");
+                at += 1;
+            }
+        }
     }
 }
