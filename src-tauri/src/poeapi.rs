@@ -68,6 +68,12 @@ const PERMANENT: [&str; 8] = [
     "Hardcore SSF Ruthless",
 ];
 
+/// This season's softcore trade league ("Keepers"), for Trade links when no Character's league is known.
+pub fn season_league() -> Option<String> {
+    let leagues = current_leagues(&get("https://www.pathofexile.com/api/leagues?type=main&realm=pc").ok()?)?;
+    leagues.into_iter().find(|l| !["Hardcore", "HC", "SSF", "Solo", "Ruthless"].iter().any(|w| l.contains(w)))
+}
+
 /// The leagues GGG marks as the current season (`category.current`).
 fn current_leagues(body: &str) -> Option<Vec<String>> {
     #[derive(Deserialize)]
@@ -113,8 +119,8 @@ pub struct OwnedGem {
     pub icon: String,
 }
 
-/// The Character's socketed gems, and its level when the answer gives it.
-pub fn items(account: &str, character: &str) -> Result<(Vec<OwnedGem>, Option<u32>), String> {
+/// The Character's socketed gems, and its level and league when the answer gives them.
+pub fn items(account: &str, character: &str) -> Result<(Vec<OwnedGem>, Option<u32>, Option<String>), String> {
     let url = format!(
         "{SITE}/get-items?accountName={}&character={}&realm=pc",
         account_param(account),
@@ -126,7 +132,7 @@ pub fn items(account: &str, character: &str) -> Result<(Vec<OwnedGem>, Option<u3
 /// Slots the gem comparison ignores: weapon swap, flasks and anything not worn.
 const SKIPPED_SLOTS: [&str; 4] = ["Weapon2", "Offhand2", "Flask", "MainInventory"];
 
-fn parse_items(body: &str) -> Result<(Vec<OwnedGem>, Option<u32>), String> {
+fn parse_items(body: &str) -> Result<(Vec<OwnedGem>, Option<u32>, Option<String>), String> {
     #[derive(Deserialize)]
     struct Items {
         items: Vec<Item>,
@@ -137,6 +143,8 @@ fn parse_items(body: &str) -> Result<(Vec<OwnedGem>, Option<u32>), String> {
     struct Who {
         #[serde(default)]
         level: Option<u32>,
+        #[serde(default)]
+        league: Option<String>,
     }
     #[derive(Deserialize)]
     struct Item {
@@ -213,7 +221,8 @@ fn parse_items(body: &str) -> Result<(Vec<OwnedGem>, Option<u32>), String> {
             });
         }
     }
-    Ok((gems, parsed.character.and_then(|c| c.level)))
+    let (level, league) = parsed.character.map(|c| (c.level, c.league)).unwrap_or_default();
+    Ok((gems, level, league))
 }
 
 fn get(url: &str) -> Result<String, String> {
@@ -282,9 +291,10 @@ mod tests {
               {"socket":2,"support":false,"typeLine":"Herald of Ash","icon":"https://web.poecdn.com/gen/image/x/HeraldOfAsh.png","properties":[{"name":"Level","values":[["7",0]]}]}]},
             {"inventoryId":"Belt","sockets":[{"group":0}],"socketedItems":[{"socket":0,"abyssJewel":true,"typeLine":"Murderous Eye Jewel"}]},
             {"inventoryId":"Weapon2","sockets":[{"group":0}],"socketedItems":[{"socket":0,"support":false,"typeLine":"Dash"}]}],
-            "character":{"name":"x","level":12}}"#;
-        let (gems, level) = parse_items(body).unwrap();
+            "character":{"name":"x","level":12,"league":"Keepers"}}"#;
+        let (gems, level, league) = parse_items(body).unwrap();
         assert_eq!(level, Some(12));
+        assert_eq!(league.as_deref(), Some("Keepers"));
         assert_eq!(gems.len(), 3, "abyss jewels and weapon swap are left out");
         assert_eq!((gems[0].level, gems[0].quality, gems[0].support), (20, 23, true));
         assert_eq!(gems[1].vaal_base.as_deref(), Some("Molten Shell"));

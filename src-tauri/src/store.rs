@@ -44,6 +44,10 @@ pub struct Saved {
     pub guide_spot: Option<(f64, f64)>,
     /// each Character's Leveling guide progress, by lowercased name ("" before one is named)
     pub guide: HashMap<String, GuideProgress>,
+    /// the Item set the player picked in the Items section; None follows the Tree spec
+    pub item_set: Option<usize>,
+    /// the Character's league, from the last items import; Trade links search it
+    pub league: String,
 }
 
 impl Default for Saved {
@@ -63,6 +67,8 @@ impl Default for Saved {
             skill_set: None,
             guide_spot: None,
             guide: HashMap::new(),
+            item_set: None,
+            league: String::new(),
         }
     }
 }

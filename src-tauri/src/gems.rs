@@ -25,18 +25,26 @@ fn brace_ids(title: &str) -> Vec<String> {
 
 /// PoB's pairing: shared brace ids, else an identical raw title, else a Build's only Skill set.
 pub fn paired(build: &Build, spec: usize) -> Option<usize> {
+    let titles: Vec<&str> = build.skill_sets.iter().map(|s| s.title.as_str()).collect();
+    pair(build, spec, &titles)
+}
+
+/// PoB's loadout pairing (`Build.lua` `SyncLoadouts`), the same for Skill sets and Item sets:
+/// the first set sharing a brace id with the Tree spec's title, else one with an identical raw
+/// title, else the only set there is.
+pub fn pair(build: &Build, spec: usize, titles: &[&str]) -> Option<usize> {
     let spec = build.specs.get(spec)?;
     let title = if spec.raw_title.is_empty() { &spec.title } else { &spec.raw_title };
     let ids = brace_ids(title);
     if !ids.is_empty() {
-        if let Some(i) = build.skill_sets.iter().position(|s| brace_ids(&s.title).iter().any(|id| ids.contains(id))) {
+        if let Some(i) = titles.iter().position(|t| brace_ids(t).iter().any(|id| ids.contains(id))) {
             return Some(i);
         }
     }
-    if let Some(i) = build.skill_sets.iter().position(|s| s.title == *title) {
+    if let Some(i) = titles.iter().position(|t| *t == title.as_str()) {
         return Some(i);
     }
-    (build.skill_sets.len() == 1).then_some(0)
+    (titles.len() == 1).then_some(0)
 }
 
 /// The Skill set to compare: the player's pick, else the paired one, else the active one.
