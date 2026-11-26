@@ -196,6 +196,10 @@
   .r-normal { color: var(--inormal); } .r-magic { color: var(--next); } .r-rare { color: var(--irare); } .r-unique { color: var(--iunique); }
   .copies { margin-left: 4px; padding: 0 5px; border: 1px solid var(--edge); border-radius: 4px; font: 500 11px var(--mono); color: var(--alloc); }
   .trade { padding: 4px 10px; font-size: 12px; white-space: nowrap; }
+  .trades { display: flex; gap: 6px; justify-content: flex-end; }
+  /* the second choice: same search, any base of the item's kind */
+  .trade.any { border-color: var(--edge); color: var(--dim); }
+  .trade.any:hover { color: var(--alloc); border-color: var(--alloc); }
   .iempty { padding: 8px 12px; border-top: 1px solid var(--edge); color: var(--plan); }
   .inote { margin: 0; color: var(--dim); font-size: 12px; }
   @media (max-width: 720px) {
@@ -595,7 +599,10 @@
       <span class="sn">${esc(r.slot)}${r.copies > 1 ? `<span class="copies">×${r.copies}</span>` : ''}</span>
       <span class="it"><b class="r-${r.rarity}">${esc(r.title)}${r.notes.length ? '<span class="hasnotes" title="The guide’s author left notes on this item">notes</span>' : ''}</b><span>${esc(r.subtitle)}${r.flags.length ? ' · ' + esc(r.flags.join(', ')) : ''}</span></span>
       <span class="gist">${gist}</span>
-      <button class="ghost trade" data-trade="${esc(r.trade)}" title="Opens a pathofexile.com trade search in your browser">Trade ↗</button>
+      <span class="trades">
+        <button class="ghost trade" data-trade="${esc(r.trade)}" title="${r.rarity === 'unique' ? 'Search the trade site for this unique' : 'Search the trade site for this base with these mods'}">Trade ↗</button>
+        ${r.trade_any ? `<button class="ghost trade any" data-trade="${esc(r.trade_any)}" title="The same search, any base of this kind">Any base ↗</button>` : ''}
+      </span>
     </summary><div class="full">${cols.join('')}</div></details>`
   }
   function renderItems() {
@@ -620,7 +627,7 @@
       parts.push(group('Gear', g.gear, 'No gear in this Item set.'))
       parts.push(group('Flasks', g.flasks, 'No flasks in this Item set.'))
       parts.push(group('Tree jewels', g.jewels, `${esc(v.spec)} has no jewels.`))
-      parts.push('<p class="inote">Trade searches ask for each item’s exact base. A rare needs its life, resistance and attribute totals, plus all but one of its other mods. Mods marked “not searched” aren’t ones the trade site knows. Advice the guide’s author typed among the mods is under “Author’s notes”.</p>')
+      parts.push('<p class="inote">Trade ↗ searches for the item’s exact base; Any base ↗ runs the same search for any base of its kind. A rare needs its life, resistance and attribute totals, plus all but one of its other mods. Mods marked “not searched” aren’t ones the trade site knows. Advice the guide’s author typed among the mods is under “Author’s notes”.</p>')
     }
     const scrolled = el.querySelector('.itemsbody')?.scrollTop ?? 0
     const open = [...el.querySelectorAll('details.irow[open]')].map(d => d.dataset.k)

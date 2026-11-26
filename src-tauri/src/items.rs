@@ -16,6 +16,8 @@ struct Stats {
     explicit: HashMap<String, String>,
     enchant: HashMap<String, String>,
     bases: Vec<String>,
+    /// base type → trade category ("Vaal Gauntlets" → "armour.gloves"), from PoB's base data
+    categories: HashMap<String, String>,
     /// lowercased texts, for PoB lines whose capitals differ from trade's ("Trap And Mine")
     #[serde(skip)]
     explicit_lower: HashMap<String, String>,
@@ -363,9 +365,32 @@ fn pseudo(tpl: &str) -> &'static [(&'static str, f64)] {
     }
 }
 
+/// The trade category for a base, or failing that for the slot it sits in (weapons need the base).
+fn category(base: Option<&str>, slot: &str) -> Option<String> {
+    if let Some(c) = base.and_then(|b| stats().categories.get(b)) {
+        return Some(c.clone());
+    }
+    let c = match slot {
+        "Helmet" => "armour.helmet",
+        "Body Armour" => "armour.chest",
+        "Gloves" => "armour.gloves",
+        "Boots" => "armour.boots",
+        "Amulet" => "accessory.amulet",
+        "Belt" => "accessory.belt",
+        "Jewel" => "jewel",
+        s if s.starts_with("Ring") => "accessory.ring",
+        s if s.starts_with("Flask") => "flask",
+        s if s.ends_with(" abyss") => "jewel.abyss",
+        _ => return None,
+    };
+    Some(c.into())
+}
+
 /// The trade search for one item, and which of its lines it searches (None: not a line that could be).
 pub struct Search {
     pub query: Value,
+    /// the same search for any base of the item's kind ("any gloves"); None for uniques, or a weapon of unknown base
+    pub any_base: Option<Value>,
     pub implicits: Vec<Option<bool>>,
     pub explicits: Vec<Option<bool>>,
 }
@@ -453,13 +478,21 @@ pub fn search(item: &Parsed, slot: &str) -> Search {
         if !misc.is_empty() {
             query["filters"]["misc_filters"] = json!({ "filters": misc });
         }
-        return Search { query, implicits, explicits };
+        let any_base = category(item.base.as_deref(), slot).map(|cat| {
+            let mut any = query.clone();
+            if let Some(o) = any.as_object_mut() {
+                o.remove("type");
+            }
+            any["filters"]["type_filters"]["filters"]["category"] = json!({ "option": cat });
+            any
+        });
+        return Search { query, any_base, implicits, explicits };
     }
     query["stats"] = json!([{ "type": "and", "filters": required }]);
     if !misc.is_empty() {
         query["filters"] = json!({ "misc_filters": { "filters": misc } });
     }
-    Search { query, implicits, explicits }
+    Search { query, any_base: None, implicits, explicits }
 }
 
 /// The trade site's own short link: gzip of the query, base64url, after the league.
@@ -514,7 +547,10 @@ pub struct Row {
     pub influences: Vec<String>,
     /// the guide author's advice typed among the mods, shown apart from them
     pub notes: Vec<String>,
+    /// the search with the item's base type
     pub trade: String,
+    /// the same search for any base of its kind; None for uniques
+    pub trade_any: Option<String>,
 }
 
 fn row(slot: &str, copies: usize, item: &Parsed, league: &str) -> Row {
@@ -552,6 +588,7 @@ fn row(slot: &str, copies: usize, item: &Parsed, league: &str) -> Row {
         flags: item.flags.clone(),
         influences: item.influences.clone(),
         trade: trade_url(league, &s.query),
+        trade_any: s.any_base.as_ref().map(|q| trade_url(league, q)),
     }
 }
 
@@ -795,6 +832,23 @@ mod tests {
         assert_eq!(r.notes, vec!["T2 Suffixes + Catalysts"]);
         assert_eq!(r.mods.len(), 2);
         assert_eq!(r.mods[1].searched, Some(false));
+    }
+
+    #[test]
+    fn any_base_swaps_the_base_for_its_category() {
+        let p = parse("Rarity: RARE\nNew Item\nVoid Sceptre\nImplicits: 0\n+(15-20)% to Fire Resistance").unwrap();
+        let s = search(&p, "Weapon 1");
+        assert_eq!(s.query["type"], "Void Sceptre");
+        let any = s.any_base.unwrap();
+        assert!(any.get("type").is_none());
+        assert_eq!(any["filters"]["type_filters"]["filters"]["category"]["option"], "weapon.sceptre");
+        assert_eq!(any["filters"]["type_filters"]["filters"]["rarity"]["option"], "nonunique");
+        assert_eq!(any["stats"], s.query["stats"]);
+        // a magic flask with no base found still knows its slot's kind
+        assert_eq!(category(None, "Flask 2").as_deref(), Some("flask"));
+        assert_eq!(category(None, "Weapon 1"), None);
+        let unique = parse("Rarity: UNIQUE\nNebulis\nVoid Sceptre\nImplicits: 0").unwrap();
+        assert!(search(&unique, "Weapon 1").any_base.is_none());
     }
 
     #[test]
