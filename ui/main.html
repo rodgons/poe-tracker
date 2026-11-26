@@ -13,6 +13,8 @@
     --alloc: #d9b45a; --next: #8888ff; --plan: #8a8072; --other: #2a251e; --refund: #e04a3f;
     --kill: #e09a4f; --item: #c9b98f; --ok: #7fbf6a;
     --card: #141210; --edge: #3b3328;
+    /* the game's item text: normal, rare, unique, mods, crafted and fractured lines */
+    --inormal: #c8c8c8; --irare: #ffff77; --iunique: #af6025; --imod: #8888ff; --icraft: #b4b4ff; --ifrac: #a29162;
     --display: "Cinzel", "Trajan Pro", Georgia, serif;
     --body: -apple-system, "Segoe UI", system-ui, sans-serif;
     --mono: ui-monospace, Menlo, Consolas, monospace;
@@ -159,6 +161,53 @@
   .gdone { margin: 14px 4px; padding: 8px 10px; border-radius: 6px; background: var(--card); border: 1px solid rgba(217, 180, 90, .45); color: var(--alloc); }
   .credit { margin: 18px 4px 0; font-size: 11.5px; color: var(--plan); }
 
+  /* Items: the Item set as checklist rows, one per slot (or jewel), the first mods inline and a
+     Trade button; a click opens all its mods. Rarity colours follow the game's own item text. */
+  .itemsbody { flex: 1; overflow-y: auto; padding: 14px 20px 28px; }
+  .itemsbody > div { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+  .igroup { border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; background: var(--card); }
+  .igroup > h2 { margin: 0; padding: 6px 12px; background: var(--scene); font: 600 11px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  .irow { border-top: 1px solid var(--edge); }
+  .irow summary { list-style: none; display: grid; grid-template-columns: 112px minmax(0, 230px) minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 7px 12px; cursor: pointer; }
+  .irow summary::-webkit-details-marker { display: none; }
+  .irow summary:hover, .irow[open] summary { background: var(--scene2); }
+  .irow summary:focus-visible { outline: 2px solid var(--alloc); outline-offset: -2px; }
+  .irow .sn { color: var(--plan); font-size: 12px; }
+  .irow .it { min-width: 0; }
+  .irow .it b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .irow .it span { color: var(--dim); font-size: 12px; }
+  .irow .gist { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--imod); font-size: 12px; }
+  .irow .gist i { font-style: normal; color: var(--plan); }
+  .irow .full { padding: 4px 12px 12px 136px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 24px; }
+  .irow .full h4 { margin: 0 0 2px; font: 600 10px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--plan); }
+  .imods { list-style: none; margin: 0; padding: 0; }
+  .imods li { color: var(--imod); }
+  .imods li.k-crafted, .imods li.k-enchant { color: var(--icraft); }
+  .imods li.k-fractured { color: var(--ifrac); }
+  .imods li small { color: var(--plan); font-size: 11px; }
+  .imods li.off { color: var(--dim); }
+  .iflag { color: var(--refund); font-size: 12px; }
+  .iflag.infl { color: var(--dim); }
+  /* the guide author's advice, kept apart from the mods: plain prose, not item text */
+  .inotes { margin: 0; padding: 6px 10px; border-left: 2px solid var(--faint); background: var(--scene); border-radius: 0 6px 6px 0; }
+  .inotes p { margin: 0; color: var(--ink); font-size: 12px; line-height: 1.45; }
+  .inotes p + p { margin-top: 4px; }
+  .hasnotes { margin-left: 6px; padding: 0 5px; border: 1px solid var(--edge); border-radius: 4px; font-size: 10.5px; color: var(--dim); font-weight: 400; vertical-align: 1px; }
+  .r-normal { color: var(--inormal); } .r-magic { color: var(--next); } .r-rare { color: var(--irare); } .r-unique { color: var(--iunique); }
+  .copies { margin-left: 4px; padding: 0 5px; border: 1px solid var(--edge); border-radius: 4px; font: 500 11px var(--mono); color: var(--alloc); }
+  .trade { padding: 4px 10px; font-size: 12px; white-space: nowrap; }
+  .trades { display: flex; gap: 6px; justify-content: flex-end; }
+  /* the second choice: same search, any base of the item's kind */
+  .trade.any { border-color: var(--edge); color: var(--dim); }
+  .trade.any:hover { color: var(--alloc); border-color: var(--alloc); }
+  .iempty { padding: 8px 12px; border-top: 1px solid var(--edge); color: var(--plan); }
+  .inote { margin: 0; color: var(--dim); font-size: 12px; }
+  @media (max-width: 720px) {
+    .irow summary { grid-template-columns: minmax(0, 1fr) auto; }
+    .irow .sn, .irow .gist { display: none; }
+    .irow .full { padding-left: 12px; }
+  }
+
   /* Build and Settings: forms in a readable column */
   .form { flex: 1; overflow-y: auto; padding: 22px 24px 32px; }
   .form > div { max-width: 580px; margin: 0 auto; }
@@ -206,6 +255,7 @@
   <p class="brand">POE Tracker</p>
   <button class="go" data-go="tree">Tree</button>
   <button class="go" data-go="gems">Gems</button>
+  <button class="go" data-go="items">Items</button>
   <button class="go" data-go="guide">Guide</button>
   <button class="go" data-go="build">Build <i class="dot" id="draftDot" hidden title="Not saved"></i></button>
   <button class="go" data-go="settings">Settings</button>
@@ -223,6 +273,8 @@
   <section class="view" id="tree" hidden><p class="empty">Loading…</p></section>
 
   <section class="view" id="gems" hidden><p class="empty">Loading…</p></section>
+
+  <section class="view" id="items" hidden><p class="empty">Loading…</p></section>
 
   <section class="view" id="guide" hidden><p class="empty">Loading…</p></section>
 
@@ -294,7 +346,7 @@
   let binds = null
 
   // ---- sections ----
-  const names = { tree: 'Tree', gems: 'Gems', guide: 'Guide', build: 'Build', settings: 'Settings' }
+  const names = { tree: 'Tree', gems: 'Gems', items: 'Items', guide: 'Guide', build: 'Build', settings: 'Settings' }
   let current = null
   function show(name) {
     if (!names[name]) return
@@ -305,6 +357,7 @@
     remember('section', name)
     if (name === 'tree') drawTree()
     if (name === 'gems') { loadGems(); invoke('refresh_gems') }
+    if (name === 'items') { loadItems(); invoke('refresh_items') }
     if (name === 'guide') loadGuide(true)
   }
   document.querySelectorAll('nav button.go').forEach(b => b.onclick = () => show(b.dataset.go))
@@ -523,6 +576,75 @@
     const el = current === 'gems' && !gems?.busy && gems?.as_of && document.querySelector('#gems .asof')
     if (el) { el.textContent = `Gems as of ${ago(gems.as_of)}`; el.classList.toggle('old', Date.now() / 1000 - gems.as_of > 600) }
   }, 30000)
+
+  // ---- Items ----
+  let items = null
+  const loadItems = () => invoke('items_view').then(v => { items = v; renderItems() })
+  const imods = (lines) => `<ul class="imods">${lines.map(m => {
+    const tag = m.kind === 'crafted' ? ' <small>crafted</small>' : m.kind === 'enchant' ? ' <small>enchant</small>' : m.kind === 'fractured' ? ' <small>fractured</small>' : ''
+    const off = m.searched === false ? ' <small>· not searched</small>' : ''
+    return `<li class="${m.kind ? 'k-' + m.kind : ''}${m.searched === false ? ' off' : ''}">${esc(m.text)}${tag}${off}</li>`
+  }).join('')}</ul>`
+  function irow(r) {
+    const shown = r.mods.filter(m => m.searched !== false)
+    const gist = r.rarity === 'unique'
+      ? (r.mods.length ? r.mods.map(m => esc(m.text)).join(' <i>·</i> ') : '<i>buy by name</i>')
+      : shown.slice(0, 3).map(m => esc(m.text)).join(' <i>·</i> ') + (shown.length > 3 ? ` <i>+${shown.length - 3} more</i>` : '')
+    const extra = [...r.influences.map(x => [x + ' item', 'infl']), ...r.flags.map(f => [f, ''])]
+    const cols = []
+    if (r.implicits.length) cols.push(`<div><h4>Implicit</h4>${imods(r.implicits)}</div>`)
+    cols.push(`<div><h4>${r.rarity === 'unique' ? (r.mods.length ? 'Picked mods' : 'Unique') : 'Mods'}</h4>${r.mods.length ? imods(r.mods) : '<p class="inote">Nothing to choose: the Trade search looks for it by name.</p>'}${extra.map(([f, c]) => `<div class="iflag ${c}">${esc(f)}</div>`).join('')}</div>`)
+    if (r.notes.length) cols.push(`<div><h4>Author’s notes</h4><div class="inotes">${r.notes.map(n => `<p>${esc(n)}</p>`).join('')}</div></div>`)
+    return `<details class="irow"><summary>
+      <span class="sn">${esc(r.slot)}${r.copies > 1 ? `<span class="copies">×${r.copies}</span>` : ''}</span>
+      <span class="it"><b class="r-${r.rarity}">${esc(r.title)}${r.notes.length ? '<span class="hasnotes" title="The guide’s author left notes on this item">notes</span>' : ''}</b><span>${esc(r.subtitle)}${r.flags.length ? ' · ' + esc(r.flags.join(', ')) : ''}</span></span>
+      <span class="gist">${gist}</span>
+      <span class="trades">
+        <button class="ghost trade" data-trade="${esc(r.trade)}" title="${r.rarity === 'unique' ? 'Search the trade site for this unique' : 'Search the trade site for this base with these mods'}">Trade ↗</button>
+        ${r.trade_any ? `<button class="ghost trade any" data-trade="${esc(r.trade_any)}" title="The same search, any base of this kind">Any base ↗</button>` : ''}
+      </span>
+    </summary><div class="full">${cols.join('')}</div></details>`
+  }
+  function renderItems() {
+    const el = $('items')
+    if (current !== 'items') return
+    const v = items
+    if (!v) {
+      el.innerHTML = '<p class="empty"><b>No build yet.</b><br>Paste your Path of Building build in the Build section.<br><button data-go="build">Go to Build</button></p>'
+      return
+    }
+    const how = v.chosen === 'paired' ? `goes with ${v.spec}` : v.chosen === 'active' ? `no Item set pairs with ${v.spec}: the build's own` : 'picked by you'
+    const options = v.item_sets.map((t, i) => `<option value="${i}"${i === v.item_set ? ' selected' : ''}>${esc(t)}</option>`).join('')
+    const follow = v.chosen === 'picked' ? '<button class="ghost" id="followSpecItems" style="padding:5px 10px;font-size:12px">Follow Tree spec</button>' : ''
+    const top = `<div class="treebar">
+      ${v.item_sets.length ? `<select id="itemSet" aria-label="Item set">${options}</select><span class="who" style="font-size:12px">${esc(how)}</span>` : ''}
+      ${follow}<span style="flex:1"></span><span class="who" style="font-size:12px" title="Trade links search this league">${v.league ? `Trade in ${esc(v.league)}` : ''}</span></div>`
+    const g = v.groups
+    const group = (title, rows, none) => `<div class="igroup"><h2>${title}</h2>${rows.length ? rows.map(irow).join('') : `<div class="iempty">${none}</div>`}</div>`
+    const parts = []
+    if (v.notice) parts.push(`<p class="inote">${esc(v.notice)}</p>`)
+    if (v.item_sets.length) {
+      parts.push(group('Gear', g.gear, 'No gear in this Item set.'))
+      parts.push(group('Flasks', g.flasks, 'No flasks in this Item set.'))
+      parts.push(group('Tree jewels', g.jewels, `${esc(v.spec)} has no jewels.`))
+      parts.push('<p class="inote">Trade ↗ searches for the item’s exact base; Any base ↗ runs the same search for any base of its kind. A rare needs its life, resistance and attribute totals, plus all but one of its other mods. Mods marked “not searched” aren’t ones the trade site knows. Advice the guide’s author typed among the mods is under “Author’s notes”.</p>')
+    }
+    const scrolled = el.querySelector('.itemsbody')?.scrollTop ?? 0
+    const open = [...el.querySelectorAll('details.irow[open]')].map(d => d.dataset.k)
+    el.innerHTML = `${top}<div class="itemsbody"><div>${parts.join('')}</div></div>`
+    el.querySelectorAll('details.irow').forEach((d, i) => { d.dataset.k = String(i); if (open.includes(d.dataset.k)) d.open = true })
+    el.querySelector('.itemsbody').scrollTop = scrolled
+    if ($('itemSet')) $('itemSet').onchange = () => invoke('set_item_set', { itemSet: Number($('itemSet').value) })
+    if ($('followSpecItems')) $('followSpecItems').onclick = () => invoke('set_item_set', { itemSet: null })
+  }
+  $('items').addEventListener('click', e => {
+    const t = e.target.closest('[data-trade]')
+    if (t) { e.preventDefault(); invoke('open_trade', { url: t.dataset.trade }); return }
+    const go = e.target.closest('[data-go]'); if (go) show(go.dataset.go)
+  })
+  listen('items', loadItems)
+  // a new Build or Tree spec changes the Item set
+  listen('gems', () => { if (current === 'items') loadItems() })
 
   // ---- Guide ----
   document.querySelector('style').textContent += GuideParts.css

@@ -19,6 +19,7 @@ mod foreground;
 mod gamewin;
 mod gems;
 mod guide;
+mod items;
 mod keys;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -54,6 +55,9 @@ struct App {
     gems: Gems,
     /// the area the player is in and its level, from the log
     area: Option<(String, u32)>,
+    /// this season's softcore league, for Trade links before a Character's league is known
+    season_league: Option<String>,
+    season_tried: bool,
 }
 
 /// The last items import from pathofexile.com, and when it can run again.
@@ -196,7 +200,12 @@ fn import_gems(handle: &AppHandle, asked: bool) {
             return;
         }
         match got {
-            Ok((owned, level)) => {
+            Ok((owned, level, league)) => {
+                if let Some(league) = league.filter(|l| *l != st.saved.league) {
+                    st.saved.league = league;
+                    let _ = store::save(&st.path, &st.saved);
+                    let _ = app.emit("items", ());
+                }
                 if level.is_some() && st.saved.guide_progress().level != level {
                     st.saved.guide_mut().level = level;
                     let _ = store::save(&st.path, &st.saved);
@@ -295,6 +304,76 @@ fn set_skill_set(skill_set: Option<usize>, app: AppHandle, state: State<'_, AppS
     Ok(())
 }
 
+/// What the Items section shows.
+#[derive(Serialize)]
+struct ItemsView {
+    item_sets: Vec<String>,
+    item_set: Option<usize>,
+    chosen: Option<gems::Chosen>,
+    spec: String,
+    /// the league Trade links search; empty until one is known
+    league: String,
+    groups: items::Groups,
+    notice: Option<String>,
+}
+
+fn items_view_of(app: &App) -> Option<ItemsView> {
+    let s = &app.saved;
+    let build = s.build.as_ref()?;
+    let spec = build.specs.get(s.spec)?;
+    let chosen = items::choose(build, s.spec, s.item_set);
+    let league = if s.league.is_empty() { app.season_league.clone().unwrap_or_default() } else { s.league.clone() };
+    let groups = chosen.map(|(i, _)| items::groups(build, i, s.spec, if league.is_empty() { "Standard" } else { &league })).unwrap_or_default();
+    let notice = if !build.has_items {
+        Some("Reading this build's items… If they don't appear, paste the build again in Build.".into())
+    } else if build.item_sets.is_empty() {
+        Some("This build has no items.".into())
+    } else {
+        None
+    };
+    Some(ItemsView {
+        item_sets: build.item_sets.iter().map(|t| pob::clean_title(&t.title)).collect(),
+        item_set: chosen.map(|(i, _)| i),
+        chosen: chosen.map(|(_, c)| c),
+        spec: spec.title.clone(),
+        league,
+        groups,
+        notice,
+    })
+}
+
+#[tauri::command]
+fn items_view(state: State<'_, AppState>) -> Option<ItemsView> {
+    items_view_of(&state.lock().unwrap())
+}
+
+/// The Items section opened: without a Character's league, learn this season's once, for Trade links.
+#[tauri::command]
+fn refresh_items(app: AppHandle, state: State<'_, AppState>) {
+    let mut st = state.lock().unwrap();
+    if !st.saved.league.is_empty() || st.season_tried {
+        return;
+    }
+    st.season_tried = true;
+    drop(st);
+    std::thread::spawn(move || {
+        let Some(league) = poeapi::season_league() else { return };
+        app.state::<AppState>().lock().unwrap().season_league = Some(league);
+        let _ = app.emit("items", ());
+    });
+}
+
+/// The player's Item set pick; None follows the Tree spec again.
+#[tauri::command]
+fn set_item_set(item_set: Option<usize>, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut st = state.lock().unwrap();
+    st.saved.item_set = item_set;
+    store::save(&st.path, &st.saved)?;
+    drop(st);
+    let _ = app.emit("items", ());
+    Ok(())
+}
+
 /// Builds saved before v0.6 kept only their trees: read the pasted build again for its
 /// Skill sets (and the raw spec titles that pair with them).
 fn upgrade_build(handle: AppHandle) {
@@ -302,7 +381,7 @@ fn upgrade_build(handle: AppHandle) {
         let st = handle.state::<AppState>();
         let st = st.lock().unwrap();
         match &st.saved.build {
-            Some(b) if b.skill_sets.is_empty() && !st.saved.input.is_empty() => st.saved.input.clone(),
+            Some(b) if (b.skill_sets.is_empty() || !b.has_items) && !st.saved.input.is_empty() => st.saved.input.clone(),
             _ => return,
         }
     };
@@ -319,11 +398,21 @@ fn upgrade_build(handle: AppHandle) {
                 old.raw_title = new.raw_title.clone();
             }
         }
+        if build.specs.len() == fresh.specs.len() {
+            for (old, new) in build.specs.iter_mut().zip(&fresh.specs) {
+                old.sockets = new.sockets.clone();
+            }
+        }
         build.skill_sets = fresh.skill_sets;
         build.active_skill_set = fresh.active_skill_set;
+        build.has_items = true;
+        build.items = fresh.items;
+        build.item_sets = fresh.item_sets;
+        build.active_item_set = fresh.active_item_set;
         let _ = store::save(&st.path, &st.saved);
         drop(st);
         let _ = handle.emit("gems", ());
+        let _ = handle.emit("items", ());
     });
 }
 
@@ -866,10 +955,12 @@ async fn save_setup(
     // a new Build or Tree spec follows its paired Skill set again
     if new_build || spec != st.saved.spec {
         st.saved.skill_set = None;
+        st.saved.item_set = None;
     }
-    // another Character's gems aren't this one's
+    // another Character's gems and league aren't this one's
     if character != st.saved.character || account != st.saved.account {
         st.gems = Gems::default();
+        st.saved.league.clear();
     }
     st.saved.spec = spec;
     st.saved.account = account;
@@ -920,6 +1011,28 @@ fn app_info(app: AppHandle, state: State<'_, AppState>) -> AppInfo {
 #[tauri::command]
 fn restart_to_update(app: AppHandle) {
     app.restart();
+}
+
+/// Opens a Trade link in the player's browser. Only trade searches: the app opens nothing else.
+#[tauri::command]
+fn open_trade(url: String) -> Result<(), String> {
+    let ok = url.strip_prefix("https://www.pathofexile.com/trade/search/").is_some_and(|rest| {
+        rest.chars().all(|c| c.is_ascii_alphanumeric() || "-_.~%/".contains(c))
+    });
+    if !ok {
+        return Err("Not a trade search link.".into());
+    }
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("rundll32");
+        c.arg("url.dll,FileProtocolHandler");
+        c
+    };
+    #[cfg(target_os = "linux")]
+    let mut cmd = std::process::Command::new("xdg-open");
+    cmd.arg(&url).spawn().map(|_| ()).map_err(|e| format!("Couldn't open your browser: {e}"))
 }
 
 /// Opens System Settings at Input Monitoring, where the player allows the key hook.
@@ -1333,6 +1446,10 @@ pub fn run() {
             gems_view,
             refresh_gems,
             set_skill_set,
+            items_view,
+            refresh_items,
+            set_item_set,
+            open_trade,
             guide_view,
             guide_jump,
             guide_options,
@@ -1346,7 +1463,7 @@ pub fn run() {
             let saved = store::load(&path);
             keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default(), area: None }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default(), area: None, season_league: None, season_tried: false }));
             upgrade_build(app.handle().clone());
 
             #[cfg(target_os = "macos")]
@@ -1400,12 +1517,13 @@ pub fn run() {
             let guide_panel_item = MenuItem::with_id(app, "guidepanel", "Show/Hide guide panel", true, None::<&str>)?;
             let guide_item = MenuItem::with_id(app, "guide", "Open guide…", true, None::<&str>)?;
             let gems_item = MenuItem::with_id(app, "gems", "Open gems…", true, None::<&str>)?;
+            let items_item = MenuItem::with_id(app, "items", "Open items…", true, None::<&str>)?;
             let tree_item = MenuItem::with_id(app, "tree", "Open tree…", true, None::<&str>)?;
             let build_item = MenuItem::with_id(app, "build", "Set up build…", true, None::<&str>)?;
             let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let resync_item = MenuItem::with_id(app, "resync", "Re-sync character…", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit POE Tracker", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&panel_item, &gem_item, &guide_panel_item, &tree_item, &gems_item, &guide_item, &build_item, &settings_item, &resync_item, &quit])?;
+            let menu = Menu::with_items(app, &[&panel_item, &gem_item, &guide_panel_item, &tree_item, &gems_item, &items_item, &guide_item, &build_item, &settings_item, &resync_item, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("POE Tracker")
@@ -1422,6 +1540,7 @@ pub fn run() {
                     }
                     "guide" => open_main(app, Some("guide")),
                     "gems" => open_main(app, Some("gems")),
+                    "items" => open_main(app, Some("items")),
                     "tree" => open_main(app, Some("tree")),
                     "build" => open_main(app, Some("build")),
                     "settings" => open_main(app, Some("settings")),

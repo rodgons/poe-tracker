@@ -14,6 +14,9 @@ pub struct Spec {
     pub nodes: Vec<u32>,
     /// mastery node → chosen effect
     pub masteries: Vec<(u32, u32)>,
+    /// tree jewel sockets: (socket node, item id in `Build::items`), as PoB saved them
+    #[serde(default)]
+    pub sockets: Vec<(u32, u32)>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -27,6 +30,33 @@ pub struct Build {
     /// index into `skill_sets` of the set the build was saved on
     #[serde(default)]
     pub active_skill_set: usize,
+    /// the Build's items, Item sets and tree jewels were read (false in builds saved before v0.9)
+    #[serde(default)]
+    pub has_items: bool,
+    /// every item in the Build, gear and jewels alike; Item sets and sockets point into it
+    #[serde(default)]
+    pub items: Vec<Item>,
+    #[serde(default)]
+    pub item_sets: Vec<ItemSet>,
+    /// index into `item_sets` of the set the build was saved on
+    #[serde(default)]
+    pub active_item_set: usize,
+}
+
+/// One item as PoB stores it: its own item text, read by `items::parse`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Item {
+    pub id: u32,
+    pub text: String,
+}
+
+/// One of the Build's named sets of items, for one stage of the Build.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ItemSet {
+    /// the title as PoB wrote it (colour codes kept, for pairing)
+    pub title: String,
+    /// (slot name, item id), filled slots only, in PoB's order
+    pub slots: Vec<(String, u32)>,
 }
 
 /// One of the Build's named sets of gems, for one stage of the Build.
@@ -122,6 +152,12 @@ pub fn parse(xml: &str) -> Result<Build, String> {
             class_id: s.attribute("classId").and_then(|c| c.parse().ok()).unwrap_or(0),
             nodes: nodes.split(',').filter_map(|n| n.trim().parse().ok()).collect(),
             masteries: parse_masteries(s.attribute("masteryEffects").unwrap_or("")),
+            sockets: s
+                .descendants()
+                .filter(|n| n.has_tag_name("Socket"))
+                .filter_map(|n| Some((n.attribute("nodeId")?.parse().ok()?, n.attribute("itemId")?.parse().ok()?)))
+                .filter(|(_, item)| *item != 0)
+                .collect(),
         });
     }
     if specs.is_empty() {
@@ -133,7 +169,47 @@ pub fn parse(xml: &str) -> Result<Build, String> {
         .map(|a| a.saturating_sub(1).min(specs.len() - 1))
         .unwrap_or(0);
     let (skill_sets, active_skill_set) = parse_skills(&doc);
-    Ok(Build { specs, active, skill_sets, active_skill_set })
+    let (items, item_sets, active_item_set) = parse_items(&doc);
+    Ok(Build { specs, active, skill_sets, active_skill_set, has_items: true, items, item_sets, active_item_set })
+}
+
+/// `<Items activeItemSet=id>` › `<Item id>` (item text) and `<ItemSet id title>` › `<Slot name itemId>`.
+/// Builds from before PoB had Item sets keep their `<Slot>`s straight under `<Items>`: one set.
+fn parse_items(doc: &roxmltree::Document) -> (Vec<Item>, Vec<ItemSet>, usize) {
+    let Some(items) = doc.descendants().find(|n| n.has_tag_name("Items")) else { return (Vec::new(), Vec::new(), 0) };
+    let pool: Vec<Item> = items
+        .children()
+        .filter(|n| n.has_tag_name("Item"))
+        .filter_map(|n| {
+            let text: String = n.children().filter(|c| c.is_text()).filter_map(|c| c.text()).collect();
+            let mut text = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n");
+            // PoB keeps the picked variants as attributes too; the text's own lines win when present
+            for (attr, line) in [("variant", "Selected Variant"), ("variantAlt", "Selected Alt Variant"), ("variantAlt2", "Selected Alt Variant Two")] {
+                if let Some(v) = n.attribute(attr) {
+                    if !text.contains(&format!("{line}:")) {
+                        text.push_str(&format!("\n{line}: {v}"));
+                    }
+                }
+            }
+            Some(Item { id: n.attribute("id")?.parse().ok()?, text })
+        })
+        .collect();
+    let slots = |set: roxmltree::Node| -> Vec<(String, u32)> {
+        set.children()
+            .filter(|n| n.has_tag_name("Slot"))
+            .filter_map(|n| Some((n.attribute("name")?.to_string(), n.attribute("itemId")?.parse().ok()?)))
+            .filter(|(_, id)| *id != 0)
+            .collect()
+    };
+    let sets: Vec<_> = items.children().filter(|n| n.has_tag_name("ItemSet")).collect();
+    if sets.is_empty() {
+        let only = slots(items);
+        return if only.is_empty() { (pool, Vec::new(), 0) } else { (pool, vec![ItemSet { title: "Default".into(), slots: only }], 0) };
+    }
+    let active = items.attribute("activeItemSet");
+    let index = sets.iter().position(|s| s.attribute("id") == active).unwrap_or(0);
+    let out = sets.iter().map(|s| ItemSet { title: s.attribute("title").unwrap_or("Default").to_string(), slots: slots(*s) }).collect();
+    (pool, out, index)
 }
 
 /// `<Skills activeSkillSet=id>` › `<SkillSet id title>` › `<Skill>` › `<Gem>`. Builds from

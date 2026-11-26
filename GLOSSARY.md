@@ -7,6 +7,11 @@
 **Skill set**: One of the named sets of gems stored inside a Build (e.g. "Level 1-30"), each made of socket groups of gems for one stage of the Build. The Skill set the player follows goes with the chosen Tree spec.
 _Avoid_: Loadout, gem setup
 
+**Item set**: One of the named sets of items stored inside a Build (e.g. "Early", "Endgame"), giving the item the Build expects in each gear and flask slot. Tree jewels belong to the Tree spec instead, not the Item set. The Item set the player follows goes with the chosen Tree spec, the same way the Skill set does.
+_Avoid_: Gear set, loadout
+
+**Items section**: The Main window section that shows the Item set: each slot's expected item (a unique by name, anything else by base and mods) with a Trade link to search for it. It shows what the Build expects, not what the Character wears.
+
 **Ascendancy**: The class's own small sub-tree (e.g. Necromancer, Juggernaut) that a Tree spec may include, with its own points earned in the Labyrinth rather than by levelling. Shown apart from the main passive tree, headed by its name.
 
 **Ascendancy points**: The Ascendancy nodes of the chosen Tree spec, counted as taken out of the spec's total (e.g. "4 / 8"), apart from the main tree's count.
@@ -27,7 +32,7 @@ _Avoid_: Loadout, gem setup
 
 **Corner panel**: The small panel inside the game window (top-right unless the player drags it elsewhere) that holds the Mini-tree, the Tree spec's progress and any Refunds. Toggled by the Panel hotkey while Path of Exile is the frontmost app, and never shown outside the game. The player can zoom and move its Mini-tree with the mouse, but it never takes the keyboard from the game.
 
-**Main window**: The one ordinary app window, away from the game, divided into sections the player moves between: **Tree** (the whole Tree spec large, every point in order, the Refunds and the choice of current Tree spec), **Gems** (the whole Skill set beside the Character's gems, each marked as had, missing or to remove), **Guide** (the whole Leveling guide, where the player can make any Guide step the current one), **Build** (paste the Build, pick the Tree spec, name the Character and set the Seed) and **Settings** (how many Next points, the Client log and the key binds). Opened on first launch and from the tray menu, which can open it at any section. It shows the Character's progress but never changes which nodes are Allocated.
+**Main window**: The one ordinary app window, away from the game, divided into sections the player moves between: **Tree** (the whole Tree spec large, every point in order, the Refunds and the choice of current Tree spec), **Gems** (the whole Skill set beside the Character's gems, each marked as had, missing or to remove), **Items** (the Item set the Build expects, each item with a Trade link), **Guide** (the whole Leveling guide, where the player can make any Guide step the current one), **Build** (paste the Build, pick the Tree spec, name the Character and set the Seed) and **Settings** (how many Next points, the Client log and the key binds). Opened on first launch and from the tray menu, which can open it at any section. It shows the Character's progress but never changes which nodes are Allocated.
 _Avoid_: Setup window, Build window
 
 **Gem panel**: A second small panel inside the game window, apart from the Corner panel, that shows how the Character's socketed gems differ from the Skill set: the gems missing and the gems to remove. Toggled by the Gem panel hotkey, movable, and never shown outside the game.
