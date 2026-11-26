@@ -1368,13 +1368,29 @@ fn open_main(app: &AppHandle, section: Option<&str>) {
     let _ = win.set_focus();
 }
 
+/// The test-build update feed: CI's rolling `test-builds` release, whose latest.json always
+/// names the newest build, test prerelease or full release.
+const TEST_FEED: &str = "https://github.com/rodgons/poe-tracker/releases/download/test-builds/latest.json";
+
+/// The updater for this machine: the full releases everyone gets, or the test-build feed when
+/// the owner has put an empty `test-builds` file in the app's config folder (there is no switch
+/// in the app, so players never land on a test build by accident).
+fn updater_for(app: &AppHandle) -> tauri_plugin_updater::Result<tauri_plugin_updater::Updater> {
+    use tauri_plugin_updater::UpdaterExt;
+    let wants_tests = app.path().app_config_dir().is_ok_and(|dir| dir.join("test-builds").exists());
+    if !wants_tests {
+        return app.updater();
+    }
+    let feed = tauri::Url::parse(TEST_FEED).expect("test feed URL");
+    app.updater_builder().endpoints(vec![feed])?.build()
+}
+
 /// Auto-update, once at launch: if GitHub has a newer release, download and install it, then
 /// restart into it straight away unless the Corner panel is showing. Then the tray menu offers
 /// the restart instead, so an update never takes the panel away mid-game. (On Windows the
 /// installer closes the app itself.) Any failure just leaves the current version running.
 async fn update(app: AppHandle, menu: Menu<tauri::Wry>) {
-    use tauri_plugin_updater::UpdaterExt;
-    let updater = match app.updater() {
+    let updater = match updater_for(&app) {
         Ok(updater) => updater,
         Err(e) => return eprintln!("updater unavailable: {e}"),
     };
