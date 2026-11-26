@@ -51,3 +51,9 @@ _Avoid_: Act tracker, campaign guide
 **Guide panel**: A third small panel inside the game window, apart from the Corner panel and the Gem panel, that shows the current Guide step. Toggled by the Guide panel hotkey, movable, mouse only, and never shown outside the game.
 
 **Guide panel hotkey**: The key combination, rebindable under Key binds, that toggles the Guide panel. Distinct from the Panel hotkey and the Gem panel hotkey.
+
+**Zone layout**: One of the known arrangements of a campaign zone, told apart by what the minimap shows where the player comes in. The player picks the one that matches; the pick holds until the Character enters a new instance of that zone. Zones with only one arrangement need no pick, and zones whose arrangement is random have no Zone layouts at all.
+_Avoid_: Variant, map, layout image
+
+**Directions**: The line under a Guide step that leads from where the Character came into the zone, past the step's objectives, to the exit the step names, worked out from the picked Zone layout and shown with a small drawing of it.
+_Avoid_: Route (that is the Leveling guide's), path
