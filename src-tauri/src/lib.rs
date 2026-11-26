@@ -21,6 +21,7 @@ mod gems;
 mod guide;
 mod items;
 mod keys;
+mod layouts;
 #[cfg(target_os = "macos")]
 mod macos;
 mod placement;
@@ -55,6 +56,9 @@ struct App {
     gems: Gems,
     /// the area the player is in and its level, from the log
     area: Option<(String, u32)>,
+    /// that area instance's seed, and the Zone layout picked in each area's instance
+    seed: u64,
+    picks: layouts::Picks,
     /// this season's softcore league, for Trade links before a Character's league is known
     season_league: Option<String>,
     season_tried: bool,
@@ -724,8 +728,10 @@ fn on_log_line(handle: &AppHandle, line: &str) {
                 _ => false,
             }
         }
-        clientlog::Event::Entered { area, level } => {
+        clientlog::Event::Entered { area, level, seed } => {
             app.area = Some((area.clone(), level));
+            app.seed = seed;
+            app.picks.entered(&area, seed);
             // the log handler holds the state: import once it lets go
             let h = handle.clone();
             std::thread::spawn(move || import_gems(&h, false));
@@ -1174,6 +1180,9 @@ struct GuideView {
     area_level: Option<u32>,
     /// the Build has gems the guide can pick (false: no Build, or no gem the route gives)
     gems: bool,
+    /// the Zone layouts of the zone the Character is in, for the current step; None in zones
+    /// without them, before the first area change and once the campaign is done
+    layout: Option<layouts::LayoutView>,
 }
 
 #[tauri::command]
@@ -1194,7 +1203,12 @@ fn guide_view(state: State<'_, AppState>) -> GuideView {
         Some((last, level))
     });
     let area_level = area.filter(|(id, _)| !route.is_town(id)).map(|(_, level)| level);
+    let layout = st.area.as_ref().and_then(|(id, _)| {
+        let name = &route.areas.get(id)?.name;
+        layouts::view(id, name, steps.get(progress.step)?, st.picks.get(id, st.seed))
+    });
     GuideView {
+        layout,
         step: progress.step.min(steps.len()),
         steps,
         options: progress.options,
@@ -1244,6 +1258,18 @@ fn guide_jump(step: usize, app: AppHandle, state: State<'_, AppState>) -> Result
     drop(st);
     let _ = app.emit("guide", ());
     Ok(())
+}
+
+/// The player picking a Zone layout (or a start picture on the way to one) in the Guide panel;
+/// None goes back to the first pick. It holds until the Character enters a new instance.
+#[tauri::command]
+fn layout_pick(pick: Option<String>, app: AppHandle, state: State<'_, AppState>) {
+    let mut st = state.lock().unwrap();
+    let Some((area, _)) = st.area.clone() else { return };
+    let seed = st.seed;
+    st.picks.set(&area, seed, pick);
+    drop(st);
+    let _ = app.emit("guide", ());
 }
 
 /// New route switches. The guide keeps its place by the area the current step heads to,
@@ -1452,6 +1478,7 @@ pub fn run() {
             open_trade,
             guide_view,
             guide_jump,
+            layout_pick,
             guide_options,
             copy_text,
             app_info,
@@ -1463,7 +1490,7 @@ pub fn run() {
             let saved = store::load(&path);
             keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default(), area: None, season_league: None, season_tried: false }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default(), area: None, seed: 0, picks: layouts::Picks::default(), season_league: None, season_tried: false }));
             upgrade_build(app.handle().clone());
 
             #[cfg(target_os = "macos")]
