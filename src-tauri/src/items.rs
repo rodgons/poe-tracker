@@ -474,6 +474,22 @@ pub fn trade_url(league: &str, query: &Value) -> String {
     format!("https://www.pathofexile.com/trade/search/{league}/{}", URL_SAFE_NO_PAD.encode(bytes))
 }
 
+/// A line the guide's author typed as advice, not a mod ("Note: …", "T2 Suffixes + Catalysts").
+/// PoB keeps them as mod lines that match nothing. Only for lines no trade stat matched: prose has
+/// no number, or a sentence's punctuation, or a shouted word ("WARNING"), or starts with "Note".
+fn is_note(line: &Line) -> bool {
+    if line.kind.is_some() {
+        return false;
+    }
+    let t = line.text.as_str();
+    let shouted = t.split(|c: char| !c.is_alphanumeric()).any(|w| w.len() >= 3 && w.chars().all(|c| c.is_ascii_uppercase()));
+    // "T2", "Ilvl" don't count as a mod's number; "25", "+1", "(8-12)" do
+    let number = t.split_whitespace().any(|w| w.trim_start_matches(['+', '-', '(']).starts_with(|c: char| c.is_ascii_digit()));
+    // a mod's brackets hold a range, "(8-12)"; the author's hold words, "(pure Arm Pref but not required)"
+    let worded_brackets = t.split('(').skip(1).any(|r| r.split(')').next().is_some_and(|inside| inside.chars().any(|c| c.is_alphabetic())));
+    t.to_lowercase().starts_with("note") || shouted || !number || worded_brackets || t.contains(['.', ',', '|', '?', '!', ':', '='])
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct ModRow {
     pub text: String,
@@ -496,6 +512,8 @@ pub struct Row {
     pub mods: Vec<ModRow>,
     pub flags: Vec<String>,
     pub influences: Vec<String>,
+    /// the guide author's advice typed among the mods, shown apart from them
+    pub notes: Vec<String>,
     pub trade: String,
 }
 
@@ -512,6 +530,12 @@ fn row(slot: &str, copies: usize, item: &Parsed, league: &str) -> Row {
         Rarity::Magic => (item.name.clone(), "Magic".into()),
         Rarity::Normal => (item.name.clone(), "Normal".into()),
     };
+    // a unique's own lines go unsearched by design, so only an outright "Note…" counts there
+    let note = |l: &Line, searched: &Option<bool>| {
+        if unique { !l.picked && l.kind.is_none() && l.text.to_lowercase().starts_with("note") } else { *searched == Some(false) && is_note(l) }
+    };
+    let notes = item.explicits.iter().zip(&s.explicits).filter(|(l, s)| note(l, s)).map(|(l, _)| l.text.clone()).collect();
+    let kept: Vec<(&Line, &Option<bool>)> = item.explicits.iter().zip(&s.explicits).filter(|(l, s)| !note(l, s)).collect();
     Row {
         slot: slot.to_string(),
         copies,
@@ -519,11 +543,12 @@ fn row(slot: &str, copies: usize, item: &Parsed, league: &str) -> Row {
         title,
         subtitle,
         implicits: if unique { Vec::new() } else { rows(&item.implicits, &s.implicits) },
-        mods: if unique {
-            item.explicits.iter().zip(&s.explicits).filter(|(l, _)| l.picked).map(|(l, s)| ModRow { text: l.text.clone(), kind: l.kind, searched: *s }).collect()
-        } else {
-            rows(&item.explicits, &s.explicits)
-        },
+        mods: kept
+            .into_iter()
+            .filter(|(l, _)| !unique || l.picked)
+            .map(|(l, s)| ModRow { text: l.text.clone(), kind: l.kind, searched: *s })
+            .collect(),
+        notes,
         flags: item.flags.clone(),
         influences: item.influences.clone(),
         trade: trade_url(league, &s.query),
@@ -752,6 +777,24 @@ mod tests {
         assert!(filter_for(ex, "45% increased Armour during Flask effect", false).is_some());
         let r = filter_for(ex, "46% reduced Amount Recovered", false).unwrap();
         assert!(r.get("value").is_none());
+    }
+
+    #[test]
+    fn the_authors_notes_stand_apart_from_mods() {
+        let note = |t: &str| is_note(&Line { text: t.into(), kind: None, picked: false });
+        for t in ["T2 Suffixes + Catalysts", "Note: If at 89/90% Max Res go with Nebulis.", "Double Multi", "+1 Fire | Fire Dmg or Multi are solid",
+            "WARNING - If your chaos res is below 15% I'd use an Amethyst Flask", "1-2 Mod Sceptres are pretty solid, Combos of like", "Purchase Elder Helmet Ilvl 82+ (pure Arm Pref but not required)"] {
+            assert!(note(t), "{t}");
+        }
+        assert!(!note("Gain 3 Charges when you are Hit by an Enemy"));
+        assert!(!note("(8-12)% chance to gain Onslaught for 4 seconds on Kill"));
+        assert!(!is_note(&Line { text: "Grants Level 30 Aspect of the Spider Skill".into(), kind: Some(Kind::Custom), picked: false }));
+
+        let p = parse("Rarity: RARE\nNew Item\nCogwork Ring\nImplicits: 0\n+110 to maximum Life\nGain 3 Charges when you are Hit by an Enemy\nT2 Suffixes + Catalysts").unwrap();
+        let r = row("Ring 1", 1, &p, "Keepers");
+        assert_eq!(r.notes, vec!["T2 Suffixes + Catalysts"]);
+        assert_eq!(r.mods.len(), 2);
+        assert_eq!(r.mods[1].searched, Some(false));
     }
 
     #[test]

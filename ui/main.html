@@ -188,6 +188,11 @@
   .imods li.off { color: var(--dim); }
   .iflag { color: var(--refund); font-size: 12px; }
   .iflag.infl { color: var(--dim); }
+  /* the guide author's advice, kept apart from the mods: plain prose, not item text */
+  .inotes { margin: 0; padding: 6px 10px; border-left: 2px solid var(--faint); background: var(--scene); border-radius: 0 6px 6px 0; }
+  .inotes p { margin: 0; color: var(--ink); font-size: 12px; line-height: 1.45; }
+  .inotes p + p { margin-top: 4px; }
+  .hasnotes { margin-left: 6px; padding: 0 5px; border: 1px solid var(--edge); border-radius: 4px; font-size: 10.5px; color: var(--dim); font-weight: 400; vertical-align: 1px; }
   .r-normal { color: var(--inormal); } .r-magic { color: var(--next); } .r-rare { color: var(--irare); } .r-unique { color: var(--iunique); }
   .copies { margin-left: 4px; padding: 0 5px; border: 1px solid var(--edge); border-radius: 4px; font: 500 11px var(--mono); color: var(--alloc); }
   .trade { padding: 4px 10px; font-size: 12px; white-space: nowrap; }
@@ -585,9 +590,10 @@
     const cols = []
     if (r.implicits.length) cols.push(`<div><h4>Implicit</h4>${imods(r.implicits)}</div>`)
     cols.push(`<div><h4>${r.rarity === 'unique' ? (r.mods.length ? 'Picked mods' : 'Unique') : 'Mods'}</h4>${r.mods.length ? imods(r.mods) : '<p class="inote">Nothing to choose: the Trade search looks for it by name.</p>'}${extra.map(([f, c]) => `<div class="iflag ${c}">${esc(f)}</div>`).join('')}</div>`)
+    if (r.notes.length) cols.push(`<div><h4>Author’s notes</h4><div class="inotes">${r.notes.map(n => `<p>${esc(n)}</p>`).join('')}</div></div>`)
     return `<details class="irow"><summary>
       <span class="sn">${esc(r.slot)}${r.copies > 1 ? `<span class="copies">×${r.copies}</span>` : ''}</span>
-      <span class="it"><b class="r-${r.rarity}">${esc(r.title)}</b><span>${esc(r.subtitle)}${r.flags.length ? ' · ' + esc(r.flags.join(', ')) : ''}</span></span>
+      <span class="it"><b class="r-${r.rarity}">${esc(r.title)}${r.notes.length ? '<span class="hasnotes" title="The guide’s author left notes on this item">notes</span>' : ''}</b><span>${esc(r.subtitle)}${r.flags.length ? ' · ' + esc(r.flags.join(', ')) : ''}</span></span>
       <span class="gist">${gist}</span>
       <button class="ghost trade" data-trade="${esc(r.trade)}" title="Opens a pathofexile.com trade search in your browser">Trade ↗</button>
     </summary><div class="full">${cols.join('')}</div></details>`
@@ -614,7 +620,7 @@
       parts.push(group('Gear', g.gear, 'No gear in this Item set.'))
       parts.push(group('Flasks', g.flasks, 'No flasks in this Item set.'))
       parts.push(group('Tree jewels', g.jewels, `${esc(v.spec)} has no jewels.`))
-      parts.push('<p class="inote">Trade searches ask for each item’s exact base. A rare needs its life, resistance and attribute totals, plus all but one of its other mods. Lines marked “not searched” aren’t mods the trade site knows, such as the author’s notes.</p>')
+      parts.push('<p class="inote">Trade searches ask for each item’s exact base. A rare needs its life, resistance and attribute totals, plus all but one of its other mods. Mods marked “not searched” aren’t ones the trade site knows. Advice the guide’s author typed among the mods is under “Author’s notes”.</p>')
     }
     const scrolled = el.querySelector('.itemsbody')?.scrollTop ?? 0
     const open = [...el.querySelectorAll('details.irow[open]')].map(d => d.dataset.k)
