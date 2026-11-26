@@ -6,7 +6,35 @@ on:
     tags: ['v*']
 
 jobs:
+  # Makes the release once, before the platform builds: when each build made its own,
+  # two finishing together made two releases on one tag and the third build failed.
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      id: ${{ steps.make.outputs.id }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: make
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # task/** branches publish test prereleases; main and v* tags publish the release
+          # the updater follows (releases/latest skips prereleases)
+          PRE: ${{ startsWith(github.ref, 'refs/heads/task/') }}
+          BODY: ${{ startsWith(github.ref, 'refs/heads/task/') && 'Unsigned test build. See the release notes in the issue that asked for it.' || 'Unsigned build. Installed copies from v0.5.4 on update themselves at launch.' }}
+        run: |
+          v=$(jq -r .version src-tauri/tauri.conf.json)
+          id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq ".[] | select(.tag_name == \"v$v\") | .id" | head -n1)
+          if [ -z "$id" ]; then
+            pre=(); [ "$PRE" = true ] && pre=(--prerelease)
+            gh release create "v$v" --target "$GITHUB_SHA" --title "POE Tracker v$v" --notes "$BODY" "${pre[@]}"
+            id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$v" --jq .id)
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: release
     permissions:
       contents: write
     strategy:
@@ -49,10 +77,21 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tauriScript: pnpm tauri
-          tagName: v__VERSION__
-          releaseName: POE Tracker v__VERSION__
-          # task/** branches publish test prereleases; main and v* tags publish the release
-          # the updater follows (releases/latest skips prereleases)
-          releaseBody: ${{ startsWith(github.ref, 'refs/heads/task/') && 'Unsigned test build. See the release notes in the issue that asked for it.' || 'Unsigned build. Installed copies from v0.5.4 on update themselves at launch.' }}
-          prerelease: ${{ startsWith(github.ref, 'refs/heads/task/') }}
+          # the release job's release; each build adds its files and its part of latest.json
+          releaseId: ${{ needs.release.outputs.id }}
           args: ${{ matrix.args }}
+
+  # Each build merges its part into the release's latest.json; two finishing together can
+  # overwrite each other's. Fail loudly rather than ship an update one OS never sees.
+  check-updater:
+    needs: [release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/${{ needs.release.outputs.id }}" --jq '.assets[] | select(.name == "latest.json") | .url' \
+            | xargs -I{} gh api -H "Accept: application/octet-stream" {} > latest.json
+          for p in darwin-universal linux-x86_64 windows-x86_64; do
+            jq -e --arg p "$p" '.platforms[$p]' latest.json > /dev/null || { echo "latest.json is missing $p: re-run the build for it"; exit 1; }
+          done
