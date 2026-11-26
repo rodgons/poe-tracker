@@ -281,6 +281,20 @@
   <section class="view" id="build" hidden>
     <div class="form"><div>
       <h1>Build</h1>
+      <fieldset class="loadouts">
+        <label for="loadout">Loadout <small>(a Character and the build it follows; a Character can have several)</small></label>
+        <div class="row" style="margin-top:4px">
+          <select id="loadout" style="flex:1"></select>
+          <input id="loadoutName" hidden spellcheck="false" autocomplete="off" style="flex:1" placeholder="Name this loadout">
+        </div>
+        <div class="row">
+          <button class="ghost" id="loadoutNew" title="Same Character, a new build">New</button>
+          <button class="ghost" id="loadoutCopy" title="A copy of this loadout, to try another build">Duplicate</button>
+          <button class="ghost" id="loadoutRename">Rename</button>
+          <button class="ghost" id="loadoutDelete">Delete</button>
+          <span class="hint" id="loadoutMsg" style="margin:0"></span>
+        </div>
+      </fieldset>
       <fieldset>
         <label for="input">Path of Building build <small>(export code, pobb.in or pastebin link)</small></label>
         <textarea id="input" spellcheck="false" placeholder="https://pobb.in/… or eNrtvW…"></textarea>
@@ -729,7 +743,7 @@
     const asc = specs[Number($('spec').value)]
     if (asc?.ascendancy) $('ascHint').innerHTML = `of ${asc.asc_points} <b>${esc(asc.ascendancy)}</b> points taken`
   }
-  $('build').addEventListener('input', e => { if (e.target.id !== 'currentOnly') setDraft(true) })
+  $('build').addEventListener('input', e => { if (e.target.id !== 'currentOnly' && !e.target.closest('.loadouts')) setDraft(true) })
 
   $('load').onclick = async () => {
     $('loadErr').textContent = ''; $('loaded').textContent = 'Loading…'; $('load').disabled = true
@@ -856,6 +870,69 @@
       $('loaded').textContent = `${s.specs.length} tree specs · shown on tree ${s.tree_version}`
       await showSpecs(s.specs, s.spec)
     }
+  }
+
+  // ---- Loadouts: switching saves straight away; the fields below follow the new one ----
+  let loadoutList = []
+  const activeLoadout = () => loadoutList.findIndex(l => l.active)
+  function showLoadouts(list) {
+    loadoutList = list
+    $('loadout').innerHTML = list.map((l, i) => `<option value="${i}"${l.active ? ' selected' : ''}>${esc(l.name)}</option>`).join('')
+    $('loadoutDelete').disabled = list.length < 2
+  }
+  const loadoutMsg = t => { $('loadoutMsg').textContent = t; if (t) setTimeout(() => { if ($('loadoutMsg').textContent === t) $('loadoutMsg').textContent = '' }, 2500) }
+  // a draft belongs to the loadout it was typed in: switching drops it
+  const leaveDraft = () => !draft || confirm('Your unsaved changes in the Build section will be lost. Switch anyway?')
+  $('loadout').onchange = async () => {
+    const i = Number($('loadout').value)
+    if (!leaveDraft()) { $('loadout').value = activeLoadout(); return }
+    try { await invoke('switch_loadout', { index: i }) } catch (e) { loadoutMsg(String(e)) }
+  }
+  $('loadoutNew').onclick = () => { if (leaveDraft()) invoke('new_loadout', { copy: false }) }
+  $('loadoutCopy').onclick = () => { if (leaveDraft()) invoke('new_loadout', { copy: true }) }
+  $('loadoutRename').onclick = () => {
+    const box = $('loadoutName'), i = activeLoadout()
+    box.value = loadoutList[i]?.name ?? ''
+    box.hidden = false; $('loadout').hidden = true
+    box.focus(); box.select()
+  }
+  async function finishRename(keep) {
+    const box = $('loadoutName')
+    if (box.hidden) return
+    box.hidden = true; $('loadout').hidden = false
+    if (!keep) return
+    try { showLoadouts(await invoke('rename_loadout', { index: activeLoadout(), name: box.value })); loadoutMsg('Renamed') } catch (e) { loadoutMsg(String(e)) }
+  }
+  $('loadoutName').onkeydown = e => { if (e.key === 'Enter') finishRename(true); if (e.key === 'Escape') finishRename(false) }
+  $('loadoutName').onblur = () => finishRename(true)
+  $('loadoutDelete').onclick = async () => {
+    const i = activeLoadout()
+    if (!confirm(`Delete the loadout "${loadoutList[i]?.name}"? The Character's progress stays.`)) return
+    try { await invoke('delete_loadout', { index: i }) } catch (e) { loadoutMsg(String(e)) }
+  }
+  listen('loadouts', e => {
+    const was = activeLoadout()
+    showLoadouts(e.payload)
+    // another loadout is active: the Build section shows its build, not the old draft
+    if (was !== -1 && was !== activeLoadout()) {
+      setDraft(false)
+      resetBuildForm()
+      loadSetup(true)
+      loadoutMsg('Switched')
+    }
+  })
+  invoke('loadouts').then(showLoadouts)
+  // empties what the last loadout's build filled in; loadSetup fills it again from the new one
+  function resetBuildForm() {
+    $('loadErr').textContent = ''; $('saveErr').textContent = ''; $('loaded').textContent = ''
+    specs = []; order = []
+    $('spec').innerHTML = ''
+    $('pick').classList.add('off')
+    $('save').disabled = true
+    $('ascRow').hidden = true
+    chars = []
+    $('charPick').hidden = true; $('character').hidden = false; $('found').textContent = ''
+    $('taken').value = 0; $('ascTaken').value = 0
   }
 
   // ---- Settings: each change saves straight away ----

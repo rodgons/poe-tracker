@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, Submenu},
     tray::TrayIconBuilder,
     AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, State, WebviewWindow,
 };
@@ -682,6 +682,15 @@ fn on_log_line(handle: &AppHandle, line: &str) {
     let t = tree::tree();
     let changed = match event {
         clientlog::Event::LevelUp { character, level } => {
+            // another Character with a Loadout of its own: follow it there
+            if !character.eq_ignore_ascii_case(&app.saved.character) {
+                if let Some(i) = app.saved.latest_for(&character) {
+                    if app.saved.switch_to(i).is_ok() {
+                        app.playing = Some(character.clone());
+                        switched(handle, app);
+                    }
+                }
+            }
             if character.eq_ignore_ascii_case(&app.saved.character) {
                 app.saved.guide_mut().level = Some(level);
                 let _ = store::save(&app.path, &app.saved);
@@ -970,7 +979,7 @@ async fn save_setup(
     // saving (or re-syncing) says the Character is the one playing
     st.playing = None;
     st.synced = None;
-    store::save(&st.path, &st.saved)?;
+    loadouts_changed(&app, st)?;
     let _ = app.emit("plan", panel_view_of(st));
     drop(guard);
     let _ = app.emit("gems", ());
@@ -1338,7 +1347,7 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
         .account
         .is_empty()
         .then(|| format!("Switched to {title}: Re-sync character so your taken points count"));
-    store::save(&st.path, &st.saved)?;
+    loadouts_changed(&app, &mut st)?;
     let _ = app.emit("plan", panel_view_of(&st));
     let _ = app.emit("gems", ());
     Ok(())
@@ -1346,6 +1355,109 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
 
 /// Shows the Main window, at `section` ("tree", "gems", "guide", "build" or "settings") when given;
 /// otherwise the page picks (Build until a build is saved, then the last section used).
+/// After the active Loadout changed: the last one's runtime state goes, the new one's
+/// name shows, and every window and the tray catch up. The caller holds the state, so
+/// anything that locks it again runs on its own thread.
+fn switched(handle: &AppHandle, st: &mut App) {
+    st.pending = None;
+    st.gems = Gems::default();
+    st.refunding.clear();
+    st.refund_unchecked = false;
+    let name = st.saved.loadouts.get(st.saved.active).map(store::loadout_name).unwrap_or_default();
+    st.synced = Some(format!("Switched to {name}"));
+    let _ = store::save(&st.path, &st.saved);
+    let _ = handle.emit("plan", panel_view_of(st));
+    for event in ["gems", "items", "guide"] {
+        let _ = handle.emit(event, ());
+    }
+    let list = st.saved.loadout_list();
+    let _ = handle.emit("loadouts", &list);
+    refresh_tray_loadouts(handle, list);
+    let h = handle.clone();
+    std::thread::spawn(move || {
+        upgrade_build(h.clone());
+        import_gems(&h, true);
+    });
+}
+
+/// The tray's Loadouts submenu, refilled whenever the list changes.
+struct TrayLoadouts(Submenu<tauri::Wry>);
+
+fn refresh_tray_loadouts(handle: &AppHandle, list: Vec<store::LoadoutEntry>) {
+    let h = handle.clone();
+    let _ = handle.run_on_main_thread(move || {
+        let Some(tray) = h.try_state::<TrayLoadouts>() else { return };
+        let menu = &tray.0;
+        while let Ok(Some(_)) = menu.remove_at(0) {}
+        for (i, l) in list.iter().enumerate() {
+            if let Ok(item) = CheckMenuItem::with_id(&h, format!("loadout:{i}"), &l.name, true, l.active, None::<&str>) {
+                let _ = menu.append(&item);
+            }
+        }
+    });
+}
+
+/// Something about the Loadouts changed but not which is active: save, tell the windows and the tray.
+fn loadouts_changed(handle: &AppHandle, st: &mut App) -> Result<Vec<store::LoadoutEntry>, String> {
+    store::save(&st.path, &st.saved)?;
+    let list = st.saved.loadout_list();
+    let _ = handle.emit("loadouts", &list);
+    refresh_tray_loadouts(handle, list.clone());
+    Ok(list)
+}
+
+#[tauri::command]
+fn loadouts(state: State<'_, AppState>) -> Vec<store::LoadoutEntry> {
+    state.lock().unwrap().saved.loadout_list()
+}
+
+fn switch_loadout_to(handle: &AppHandle, index: usize) -> Result<(), String> {
+    let st = handle.state::<AppState>();
+    let mut st = st.lock().unwrap();
+    if index == st.saved.active {
+        // the tray unticks an item when it's clicked: tick it again
+        let list = st.saved.loadout_list();
+        refresh_tray_loadouts(handle, list);
+        return Ok(());
+    }
+    st.saved.switch_to(index)?;
+    switched(handle, &mut st);
+    Ok(())
+}
+
+#[tauri::command]
+fn switch_loadout(index: usize, app: AppHandle) -> Result<(), String> {
+    switch_loadout_to(&app, index)
+}
+
+/// A new Loadout: a copy of the active one, or the same Character with no Build yet.
+#[tauri::command]
+fn new_loadout(copy: bool, app: AppHandle, state: State<'_, AppState>) {
+    let mut st = state.lock().unwrap();
+    st.saved.new_loadout(copy);
+    switched(&app, &mut st);
+}
+
+#[tauri::command]
+fn rename_loadout(index: usize, name: String, app: AppHandle, state: State<'_, AppState>) -> Result<Vec<store::LoadoutEntry>, String> {
+    let mut st = state.lock().unwrap();
+    st.saved.rename_loadout(index, &name)?;
+    loadouts_changed(&app, &mut st)
+}
+
+#[tauri::command]
+fn delete_loadout(index: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut st = state.lock().unwrap();
+    let was = st.saved.active;
+    st.saved.delete_loadout(index)?;
+    if index == was {
+        switched(&app, &mut st);
+    } else {
+        loadouts_changed(&app, &mut st)?;
+    }
+    Ok(())
+}
+
 fn open_main(app: &AppHandle, section: Option<&str>) {
     let Some(win) = app.get_webview_window("main") else { return };
     #[cfg(target_os = "macos")]
@@ -1488,6 +1600,11 @@ pub fn run() {
             guide_view,
             guide_jump,
             layout_pick,
+            loadouts,
+            switch_loadout,
+            new_loadout,
+            rename_loadout,
+            delete_loadout,
             guide_options,
             copy_text,
             app_info,
@@ -1496,7 +1613,8 @@ pub fn run() {
         ])
         .setup(|app| {
             let path = store::path(app.path().app_config_dir()?);
-            let saved = store::load(&path);
+            let mut saved = store::load(&path);
+            saved.ensure_loadout();
             keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
             app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default(), area: None, seed: 0, picks: layouts::Picks::default(), season_league: None, season_tried: false }));
@@ -1558,8 +1676,10 @@ pub fn run() {
             let build_item = MenuItem::with_id(app, "build", "Set up build…", true, None::<&str>)?;
             let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let resync_item = MenuItem::with_id(app, "resync", "Re-sync character…", true, None::<&str>)?;
+            let loadouts_menu = Submenu::with_id(app, "loadouts", "Loadouts", true)?;
+            app.manage(TrayLoadouts(loadouts_menu.clone()));
             let quit = MenuItem::with_id(app, "quit", "Quit POE Tracker", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&panel_item, &gem_item, &guide_panel_item, &tree_item, &gems_item, &items_item, &guide_item, &build_item, &settings_item, &resync_item, &quit])?;
+            let menu = Menu::with_items(app, &[&panel_item, &gem_item, &guide_panel_item, &tree_item, &gems_item, &items_item, &guide_item, &loadouts_menu, &build_item, &settings_item, &resync_item, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("POE Tracker")
@@ -1583,7 +1703,11 @@ pub fn run() {
                     "resync" => resync(app),
                     "update" => app.restart(),
                     "quit" => app.exit(0),
-                    _ => {}
+                    id => {
+                        if let Some(i) = id.strip_prefix("loadout:").and_then(|i| i.parse().ok()) {
+                            let _ = switch_loadout_to(app, i);
+                        }
+                    }
                 })
                 .build(app)?;
             // the panel no longer shows at launch, so a missing permission is told in the Main window
@@ -1597,6 +1721,8 @@ pub fn run() {
             std::thread::spawn(move || run_toggle_loop(handle, rx));
             let handle = app.handle().clone();
             std::thread::spawn(move || follow_log(handle));
+            let list = app.state::<AppState>().lock().unwrap().saved.loadout_list();
+            refresh_tray_loadouts(app.handle(), list);
             tauri::async_runtime::spawn(update(app.handle().clone(), menu));
             Ok(())
         })

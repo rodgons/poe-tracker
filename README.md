@@ -38,6 +38,8 @@ Download from [Releases](https://github.com/rodgons/poe-tracker/releases). The b
    Under **Key binds**, click an action and press new keys to rebind it (the panel hotkey, the Gem panel hotkey, hide, zoom and moving the view). They take effect at once; **Reset to defaults** puts them back.
 5. Switch to Path of Exile and press the panel hotkey, **⌥P** (macOS) or **Alt+P** (Windows/Linux) unless you changed it, to show or hide the Corner panel. The tray icon hides it too.
 
+**Loadouts**: each saved Character + Build pairing is a Loadout, and you can keep several, even for the same character (say, two PoBs you're comparing). Pick one at the top of the Build section, where **New** starts one for the same character, **Duplicate** copies the current one, and **Rename** / **Delete** do what they say; the tray's **Loadouts** menu switches too. A character's taken points, league and Leveling guide step are shared by all its Loadouts. When the game log shows a different character levelling up, the app switches to that character's last-used Loadout by itself.
+
 When a Tree spec is complete the panel names the Build's next spec; switch to it in the Tree section (**Open tree…**).
 
 ## Ground rules
