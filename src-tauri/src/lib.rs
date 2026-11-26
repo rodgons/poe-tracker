@@ -526,11 +526,12 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                 key = "panel hotkey";
                 visible = !visible;
             }
-            Msg::Esc if visible || gems_visible || guide_visible => {
+            // Esc hides the Corner and Gem panels; the Guide panel stays up through the game's own
+            // Esc presses (menus, dialogue) and goes only with its hotkey
+            Msg::Esc if visible || gems_visible => {
                 key = "Esc";
                 visible = false;
                 gems_visible = false;
-                guide_visible = false;
             }
             Msg::TogglePanel if in_poe || visible => visible = !visible,
             Msg::GemHotkey | Msg::ToggleGemPanel if in_poe || gems_visible => {

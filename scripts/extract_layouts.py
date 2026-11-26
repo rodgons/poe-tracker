@@ -320,9 +320,14 @@ def main():
     zones, review = {}, []
     for zone, files in by_zone.items():
         def build(node):
-            drawing, _ = picture(files[node['id']])
+            drawing, guesses = picture(files[node['id']])
             out = {'id': node['id'], **drawing}
             if node['children']:
+                # a start picture: where the player arrives, for its "you are here" dot (the plain
+                # purple square; only a position, so the guess needs no hand check)
+                start = next((g['at'] for g in guesses if g['kind'] == 'entrance'), None)
+                if start:
+                    out['start'] = start
                 out['children'] = [build(c) for c in node['children']]
             else:
                 m = markers.get(zone, {}).get(node['id'])

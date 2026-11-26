@@ -70,8 +70,13 @@ window.LayoutParts = (() => {
     : m.kind === 'exit' ? `<span class="g-enter">▲ ${esc(L.exit_name || 'exit')}</span>`
     : `<span class="l-obj">◆</span> ${esc(m.name)}`
 
+  // where the player arrives on a start picture (or on a layout offered as a choice)
+  const arrival = node => node.start || (node.marks || []).find(m => m.kind === 'entrance')?.at || null
+
   function bbox(node) {
     const pts = [...node.lines, ...(node.clues || [])].flat()
+    const a = arrival(node)
+    if (a) pts.push(a)
     if (!pts.length) return [0, 0, 1, 1]
     const xs = pts.map(p => p[0]), ys = pts.map(p => p[1])
     let [x0, y0, x1, y1] = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
@@ -86,6 +91,8 @@ window.LayoutParts = (() => {
     const u = vb[2] / size  // one screen pixel in drawing units
     const pl = (l, cls) => `<polyline class="${cls}" points="${l.map(p => p.join(',')).join(' ')}"/>`
     let out = node.lines.map(l => pl(l, 'l-wall')).join('') + (node.clues || []).map(l => pl(l, 'l-clue')).join('')
+    const a = crop && arrival(node)
+    if (a) out += `<circle class="l-m-here" cx="${a[0]}" cy="${a[1]}" r="${4.5 * u}"/>`
     if (d) {
       out += `<polyline class="l-route" points="${d.path.map(m => m.at.join(',')).join(' ')}"/>`
       const on = new Set(d.path)
@@ -109,8 +116,9 @@ window.LayoutParts = (() => {
     const back = L.pick && !single ? '<button class="l-link" data-lpick="">change</button>' : ''
     if (!node || node.children) {
       const choices = node ? node.children : L.nodes
-      const thumbs = choices.map((c, i) => `<button class="l-thumb" data-lpick="${esc(c.id)}" aria-label="Start ${i + 1}" title="Matches my minimap"><span class="l-n">${i + 1}</span>${svg(c, 54, null, L, true)}</button>`).join('')
-      return `<div class="l-row"><span class="l-hint">${node ? 'Then:' : 'Your start:'}</span><div class="l-thumbs">${thumbs}</div>${back}</div>`
+      const thumbs = choices.map((c, i) => `<button class="l-thumb" data-lpick="${esc(c.id)}" aria-label="Layout ${i + 1}" title="This one matches my minimap"><span class="l-n">${i + 1}</span>${svg(c, 110, null, L, true)}</button>`).join('')
+      const hint = node ? 'Now, which matches your minimap?' : 'Which matches your minimap where you came in? Look for the green lines.'
+      return `<div class="l-pick"><div class="l-hint">${hint} <span class="l-key"><i class="l-here">●</i> you <i class="l-green">━</i> look for this <i class="l-white">━</i> walls</span>${back ? ' ' + back : ''}</div><div class="l-thumbs">${thumbs}</div></div>`
     }
     const d = directions(L, node)
     if (!d) return `<div class="l-row"><span class="l-hint">No start marked on this layout.</span>${back}</div>`
@@ -137,12 +145,20 @@ window.LayoutParts = (() => {
   const css = `
     .l-row { border-top: 1px solid var(--rule); margin-top: 2px; padding-top: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .l-hint { font-size: 11px; color: var(--dim); }
-    .l-thumbs { display: flex; flex-wrap: wrap; gap: 4px; max-width: calc(6 * 58px); }
+    .l-pick { border-top: 1px solid var(--rule); margin-top: 2px; padding-top: 4px; display: flex; flex-direction: column; gap: 5px; }
+    .l-key { margin-left: 6px; display: inline-flex; gap: 8px; font-size: 10.5px; color: var(--plan); }
+    .l-key i { font-style: normal; }
+    .l-here { color: var(--ok); } .l-green { color: #6fe04f; } .l-white { color: var(--faint); }
+    .l-thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
     .l-thumb, .l-mini { all: unset; box-sizing: border-box; cursor: pointer; border: 1px solid var(--rule); border-radius: 4px; background: #110f0c; position: relative; display: block; line-height: 0; }
     .l-thumb:hover, .l-mini:hover { border-color: var(--edge); }
     .l-thumb:focus-visible, .l-mini:focus-visible, .l-link:focus-visible { outline: 2px solid var(--alloc); outline-offset: 1px; }
     .l-mini[aria-expanded="true"] { border-color: var(--alloc); }
-    .l-n { position: absolute; top: 2px; left: 3px; font: 700 10px var(--mono); line-height: 1; color: var(--alloc); }
+    .l-n { position: absolute; top: 3px; left: 4px; font: 700 11px var(--mono); line-height: 1; color: var(--alloc); }
+    .l-thumb .l-wall { stroke: var(--faint); stroke-width: 1.4; }
+    .l-thumb .l-clue { stroke: #6fe04f; stroke-width: 2.6; }
+    .l-thumb:hover .l-wall { stroke: var(--plan); }
+    .l-m-here { fill: var(--ok); stroke: #11100c; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
     .l-legs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 11.5px; min-width: 0; flex: 1 1 260px; }
     .l-sep { color: var(--plan); }
     .l-fill { flex: 0 0 0; }
