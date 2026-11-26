@@ -132,7 +132,6 @@ struct Setup {
 
 pub enum Msg {
     Hotkey,
-    Esc,
     /// +1 in, -1 out, 0 back to the whole spec
     Zoom(i8),
     /// move the zoomed Mini-tree view: (x, y) steps
@@ -525,13 +524,6 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                 presses += 1;
                 key = "panel hotkey";
                 visible = !visible;
-            }
-            // Esc hides the Corner and Gem panels; the Guide panel stays up through the game's own
-            // Esc presses (menus, dialogue) and goes only with its hotkey
-            Msg::Esc if visible || gems_visible => {
-                key = "Esc";
-                visible = false;
-                gems_visible = false;
             }
             Msg::TogglePanel if in_poe || visible => visible = !visible,
             Msg::GemHotkey | Msg::ToggleGemPanel if in_poe || gems_visible => {

@@ -883,7 +883,7 @@
 
   // Key binds: saved and listened for as soon as they're recorded
   const actions = [
-    ['toggle', 'Show / hide the Corner panel'], ['gem_toggle', 'Show / hide the Gem panel'], ['guide_toggle', 'Show / hide the Guide panel'], ['hide', 'Hide the panels'],
+    ['toggle', 'Show / hide the Corner panel'], ['gem_toggle', 'Show / hide the Gem panel'], ['guide_toggle', 'Show / hide the Guide panel'],
     ['zoom_in', 'Zoom in'], ['zoom_out', 'Zoom out'], ['zoom_whole', 'Zoom to the whole spec'],
     ['pan_left', 'Move view left'], ['pan_right', 'Move view right'], ['pan_up', 'Move view up'], ['pan_down', 'Move view down'],
   ]
@@ -891,10 +891,10 @@
   function showBinds() {
     $('binds').innerHTML = actions.map(([id, label]) =>
       `<span>${label}</span><button class="ghost${recording === id ? ' rec' : ''}" data-bind="${id}">${recording === id ? 'Press keys…' : esc(KeyLabel.format(binds[id]))}</button>`).join('')
-    const bare = actions.filter(([id]) => id !== 'hide' && !['alt', 'ctrl', 'shift', 'meta'].some(m => binds[id][m]))
+    const bare = actions.filter(([id]) => !['alt', 'ctrl', 'shift', 'meta'].some(m => binds[id][m]))
     $('bindHint').textContent = bare.length
       ? `While Path of Exile is in front these keys go to the app, not the game. ${bare.map(([, l]) => l).join(', ')} has no modifier, so the game loses that key then.`
-      : 'While Path of Exile is in front these keys go to the app, not the game (Esc still reaches the game).'
+      : 'While Path of Exile is in front these keys go to the app, not the game. Every other key, Esc included, reaches the game.'
     banners()
   }
   $('binds').onclick = e => {
