@@ -86,13 +86,41 @@ const MiniTree = (() => {
     return `<svg style="user-select:none;-webkit-user-select:none" class="${cls}${cam.zoom > 1 ? ' zoomed' : ''}${cam.drag ? ' dragging' : ''}" viewBox="${x0} ${y0} ${w} ${h}" role="img" aria-label="${esc(label)}">${g}</svg>`
   }
 
+  // the Ascendancy inset can be minimized to its header, so it stops covering the tree; the choice
+  // is remembered (shared by the panel and the main window) and toggled by clicking the header
+  const MIN_KEY = 'poe-tracker.asc-min'
+  let ascMin = false
+  try { ascMin = localStorage.getItem(MIN_KEY) === '1' } catch {}
+  document.addEventListener('click', e => {
+    const hd = e.target.closest('.asc-hd')
+    if (!hd) return
+    ascMin = !ascMin
+    try { localStorage.setItem(MIN_KEY, ascMin ? '1' : '0') } catch {}
+    document.querySelectorAll('.asc').forEach(el => el.classList.toggle('min', ascMin))
+    document.querySelectorAll('.asc-hd').forEach(el => el.setAttribute('aria-expanded', String(!ascMin)))
+  })
+  window.addEventListener('storage', e => {
+    if (e.key !== MIN_KEY) return
+    ascMin = e.newValue === '1'
+    document.querySelectorAll('.asc').forEach(el => el.classList.toggle('min', ascMin))
+  })
+  const ASC_CSS = `.asc-hd { cursor: pointer; user-select: none; -webkit-user-select: none; align-items: baseline; }
+    .asc-hd i { font-style: normal; margin-right: 4px; display: inline-block; transition: transform .15s; }
+    .asc.min { width: auto !important; max-width: 60%; }
+    .asc.min .asc-hd { padding-bottom: 3px; }
+    .asc.min .asc-hd i { transform: rotate(-90deg); }
+    .asc.min svg { display: none !important; }`
+  document.head.insertAdjacentHTML('beforeend', `<style>${ASC_CSS}</style>`)
+
   /** The Ascendancy inset: its name and Ascendancy points over the whole Ascendancy, `width` CSS pixels
-   *  wide, drawn at a fixed frame (the mouse never zooms or drags it). Names only when `names`. */
+   *  wide, drawn at a fixed frame (the mouse never zooms or drags it). Names only when `names`.
+   *  Clicking its header minimizes it to the header alone, and back. */
   function inset(a, width, { names = false, pending = [] } = {}) {
     const [x0, y0, x1, y1] = a.bounds
     const ratio = Math.min(1.2, Math.max(.6, (y1 - y0) / Math.max(1, x1 - x0)))
     const svg = draw({ ...a, pending }, width, ratio, camera(1), { cls: 'asctree', all: true, names, size: .5, label: `${a.name} Ascendancy` })
-    return `<div class="asc" style="width:${width}px"><div class="asc-hd"><span>${esc(a.name)}</span><b>${a.done} / ${a.total}</b></div>${svg}</div>`
+    const tip = 'click to minimize or show the Ascendancy'
+    return `<div class="asc${ascMin ? ' min' : ''}" style="width:${width}px"><div class="asc-hd" role="button" aria-expanded="${!ascMin}" title="${tip}"><span><i>▾</i>${esc(a.name)}</span><b>${a.done} / ${a.total}</b></div>${svg}</div>`
   }
 
   /** The Next points' numbered badges, then every name. Badges are placed in order, so 1 always keeps
