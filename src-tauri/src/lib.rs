@@ -115,6 +115,11 @@ struct Loaded {
 
 #[derive(Serialize)]
 struct Setup {
+    /// the Loadout's name; empty for a new one
+    name: String,
+    /// the Characters the app already tracks points for (lowercased), so the Build
+    /// section can offer to keep them
+    known: Vec<String>,
     input: String,
     account: String,
     character: String,
@@ -840,15 +845,20 @@ fn spec_order(spec: usize, state: State<'_, AppState>) -> Result<Vec<String>, St
 
 #[tauri::command]
 fn current_setup(state: State<'_, AppState>) -> Setup {
-    let app = state.lock().unwrap();
+    current_setup_of(&state.lock().unwrap())
+}
+
+fn current_setup_of(app: &App) -> Setup {
     let saved = &app.saved;
     Setup {
+        name: saved.loadouts.get(saved.active).map(|l| l.name.clone()).unwrap_or_default(),
+        known: saved.known_characters(),
         input: saved.input.clone(),
         account: saved.account.clone(),
         character: saved.character.clone(),
         spec: saved.spec,
-        taken: panel_view_of(&app).map_or(0, |v| v.done),
-        asc_taken: panel_view_of(&app).and_then(|v| v.asc).map_or(0, |a| a.done),
+        taken: panel_view_of(app).map_or(0, |v| v.done),
+        asc_taken: panel_view_of(app).and_then(|v| v.asc).map_or(0, |a| a.done),
         points: saved.points,
         specs: saved.build.as_ref().map(spec_choices).unwrap_or_default(),
         tree_version: tree::tree().version.clone(),
@@ -915,7 +925,11 @@ async fn find_characters(account: String) -> Result<Vec<poeapi::Character>, Stri
 /// Saves the setup. With `taken` the Seed is the first points in order (and the first
 /// `asc_taken` Ascendancy points); without, it's imported from pathofexile.com.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn save_setup(
+    name: String,
+    create: bool,
+    keep: bool,
     spec: usize,
     account: String,
     character: String,
@@ -925,9 +939,19 @@ async fn save_setup(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (account, character) = (account.trim().to_string(), character.trim().to_string());
-    let (chosen, kept) = {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Give this loadout a name.".into());
+    }
+    let (chosen, kept, tracked) = {
         let st = state.lock().unwrap();
-        let build = st.pending.as_ref().map(|(_, b)| b).or(st.saved.build.as_ref()).ok_or("Load a build first.")?;
+        // a new Loadout has only the build loaded for it, never the active one's
+        let saved_build = if create { None } else { st.saved.build.as_ref() };
+        let build = st.pending.as_ref().map(|(_, b)| b).or(saved_build).ok_or("Load a build first.")?;
+        let tracked = st.saved.tracked(&character);
+        if keep && tracked.is_none() {
+            return Err(format!("The app has no points for {character} yet: import them or set them by hand."));
+        }
         // re-saving the same spec with the taken count as it stands (say, to fix the
         // character name) keeps the exact points, not the first ones in order
         let view = panel_view_of(&st);
@@ -936,7 +960,8 @@ async fn save_setup(
             && taken.is_some()
             && taken == view.as_ref().map(|v| v.done)
             && asc_taken.unwrap_or(0) == view.and_then(|v| v.asc).map_or(0, |a| a.done);
-        (build.specs.get(spec).ok_or("Pick a tree spec.")?.clone(), unchanged.then(|| st.saved.allocated.clone()))
+        let kept = if keep { tracked.as_ref().map(|t| t.allocated.clone()) } else { unchanged.then(|| st.saved.allocated.clone()) };
+        (build.specs.get(spec).ok_or("Pick a tree spec.")?.clone(), kept, tracked)
     };
     let allocated = match (kept, taken) {
         (Some(kept), _) => kept,
@@ -955,6 +980,10 @@ async fn save_setup(
     };
     let mut guard = state.lock().unwrap();
     let st = &mut *guard;
+    if create {
+        st.saved.new_loadout(false);
+        st.gems = Gems::default();
+    }
     let new_build = st.pending.is_some();
     if let Some((input, build)) = st.pending.take() {
         st.saved.input = input;
@@ -968,12 +997,14 @@ async fn save_setup(
     // another Character's gems and league aren't this one's
     if character != st.saved.character || account != st.saved.account {
         st.gems = Gems::default();
-        st.saved.league.clear();
+        st.saved.league = tracked.map(|t| t.league).unwrap_or_default();
     }
     st.saved.spec = spec;
     st.saved.account = account;
     st.saved.character = character;
     st.saved.allocated = allocated;
+    let active = st.saved.active;
+    st.saved.rename_loadout(active, &name)?;
     st.refunding.clear();
     st.refund_unchecked = false;
     // saving (or re-syncing) says the Character is the one playing
@@ -982,6 +1013,8 @@ async fn save_setup(
     loadouts_changed(&app, st)?;
     let _ = app.emit("plan", panel_view_of(st));
     drop(guard);
+    let _ = app.emit("items", ());
+    let _ = app.emit("guide", ());
     let _ = app.emit("gems", ());
     import_gems(&app, true);
     Ok(())
@@ -1425,24 +1458,56 @@ fn switch_loadout_to(handle: &AppHandle, index: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// Opens the Build section's editor: "new" starts empty for the active Character, "copy"
+/// starts from Loadout `index` (its build loaded, nothing saved until Save), "edit" switches to
+/// Loadout `index` and starts from it.
+#[tauri::command]
+fn open_editor(mode: String, index: usize, app: AppHandle) -> Result<Setup, String> {
+    if mode == "edit" {
+        switch_loadout_to(&app, index)?;
+    }
+    let st = app.state::<AppState>();
+    let mut st = st.lock().unwrap();
+    st.pending = None;
+    let mut setup = current_setup_of(&st);
+    match mode.as_str() {
+        "edit" => {}
+        "new" => {
+            setup.name = String::new();
+            setup.input = String::new();
+            setup.spec = 0;
+            setup.specs = Vec::new();
+            setup.taken = 0;
+            setup.asc_taken = 0;
+        }
+        "copy" => {
+            st.saved.stash();
+            let l = st.saved.loadouts.get(index).ok_or("No such loadout.")?.clone();
+            let build = l.build.clone().ok_or("That loadout has no build to copy.")?;
+            setup.name = format!("{} copy", l.name);
+            setup.input = l.input.clone();
+            setup.account = l.account.clone();
+            setup.character = l.character.clone();
+            setup.spec = l.spec;
+            setup.specs = spec_choices(&build);
+            setup.taken = 0;
+            setup.asc_taken = 0;
+            st.pending = Some((l.input, build));
+        }
+        _ => return Err("Unknown editor mode.".into()),
+    }
+    Ok(setup)
+}
+
+/// The editor closed without saving: forget the build loaded in it.
+#[tauri::command]
+fn close_editor(state: State<'_, AppState>) {
+    state.lock().unwrap().pending = None;
+}
+
 #[tauri::command]
 fn switch_loadout(index: usize, app: AppHandle) -> Result<(), String> {
     switch_loadout_to(&app, index)
-}
-
-/// A new Loadout: a copy of the active one, or the same Character with no Build yet.
-#[tauri::command]
-fn new_loadout(copy: bool, app: AppHandle, state: State<'_, AppState>) {
-    let mut st = state.lock().unwrap();
-    st.saved.new_loadout(copy);
-    switched(&app, &mut st);
-}
-
-#[tauri::command]
-fn rename_loadout(index: usize, name: String, app: AppHandle, state: State<'_, AppState>) -> Result<Vec<store::LoadoutEntry>, String> {
-    let mut st = state.lock().unwrap();
-    st.saved.rename_loadout(index, &name)?;
-    loadouts_changed(&app, &mut st)
 }
 
 #[tauri::command]
@@ -1602,9 +1667,9 @@ pub fn run() {
             layout_pick,
             loadouts,
             switch_loadout,
-            new_loadout,
-            rename_loadout,
             delete_loadout,
+            open_editor,
+            close_editor,
             guide_options,
             copy_text,
             app_info,

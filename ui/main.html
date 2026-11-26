@@ -44,6 +44,25 @@
   nav .sync[hidden] { display: none; }
   nav .sync span { font: 400 11px var(--body); color: var(--dim); min-height: 1.4em; }
   nav .sync span.bad { color: var(--refund); }
+  /* the loadout being followed, on every section */
+  nav .cur-lo { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left;
+    background: var(--scene2); color: var(--ink); border: 1px solid var(--edge); border-left: 3px solid var(--alloc); padding: 7px 9px; }
+  nav .cur-lo[hidden] { display: none; }
+  nav .cur-lo small { font: 600 9.5px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  nav .cur-lo b { font: 600 12.5px var(--body); color: var(--alloc); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  nav .cur-lo span { font: 400 11px var(--body); color: var(--dim); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* the Build section's loadout list */
+  .lo-top { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .lo-top h1 { margin: 0 !important; flex: 1; }
+  .lo-row { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--edge); border-radius: 8px; padding: 6px 8px 6px 4px; margin-bottom: 8px; }
+  .lo-row.active { border-color: var(--alloc); box-shadow: inset 3px 0 0 var(--alloc); }
+  .lo-use { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; background: none; color: var(--ink); text-align: left; padding: 6px 8px; }
+  .lo-use:hover b { text-decoration: underline; }
+  .lo-use b { font: 600 13.5px var(--body); color: var(--ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lo-row.active .lo-use b { color: var(--alloc); }
+  .lo-use span { font: 400 12px var(--body); color: var(--dim); }
+  .lo-row .tag { font: 600 10px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--alloc); padding: 0 6px; }
+  .lo-row button.ghost { padding: 5px 10px; font-size: 12px; }
 
   #content { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100vh; }
   /* problems that touch the whole app, each with a way to fix it */
@@ -260,6 +279,7 @@
   <button class="go" data-go="build">Build <i class="dot" id="draftDot" hidden title="Not saved"></i></button>
   <button class="go" data-go="settings">Settings</button>
   <footer>
+    <button class="cur-lo" id="curLoadout" hidden title="The loadout you're following · click to change"><small>Following</small><b id="curName"></b><span id="curWho"></span></button>
     <div class="sync" id="sync" hidden>
       <button class="ghost" id="resync" title="Import the Character's taken points from pathofexile.com again">Re-sync character</button>
       <span id="synced" role="status"></span>
@@ -279,21 +299,17 @@
   <section class="view" id="guide" hidden><p class="empty">Loading…</p></section>
 
   <section class="view" id="build" hidden>
-    <div class="form"><div>
-      <h1>Build</h1>
-      <fieldset class="loadouts">
-        <label for="loadout">Loadout <small>(a Character and the build it follows; a Character can have several)</small></label>
-        <div class="row" style="margin-top:4px">
-          <select id="loadout" style="flex:1"></select>
-          <input id="loadoutName" hidden spellcheck="false" autocomplete="off" style="flex:1" placeholder="Name this loadout">
-        </div>
-        <div class="row">
-          <button class="ghost" id="loadoutNew" title="Same Character, a new build">New</button>
-          <button class="ghost" id="loadoutCopy" title="A copy of this loadout, to try another build">Duplicate</button>
-          <button class="ghost" id="loadoutRename">Rename</button>
-          <button class="ghost" id="loadoutDelete">Delete</button>
-          <span class="hint" id="loadoutMsg" style="margin:0"></span>
-        </div>
+    <div class="form" id="loList"><div>
+      <div class="lo-top"><h1>Loadouts</h1><button id="loNew">New loadout</button></div>
+      <p class="hint" style="margin:-8px 0 14px">Each loadout pairs a Character with a Path of Building build. Click one to follow it.</p>
+      <div id="loRows"></div>
+      <p class="err" id="loErr"></p>
+    </div></div>
+    <div class="form" id="loEdit" hidden><div>
+      <div class="lo-top"><button class="ghost" id="loBack">‹ Loadouts</button><h1 id="loTitle" style="flex:1">New loadout</h1></div>
+      <fieldset>
+        <label for="loName">Name <small>(how this loadout shows in the list, the sidebar and the tray)</small></label>
+        <input id="loName" spellcheck="false" autocomplete="off" placeholder="e.g. RF Juggernaut">
       </fieldset>
       <fieldset>
         <label for="input">Path of Building build <small>(export code, pobb.in or pastebin link)</small></label>
@@ -313,12 +329,13 @@
           <select id="charPick" hidden style="flex:1"></select>
         </div>
         <label class="gap">Points already taken</label>
+        <label class="opt" id="keepOpt" hidden><input type="radio" name="seed" value="keep"> Keep the points the app already tracks for this character</label>
         <label class="opt"><input type="radio" name="seed" value="import"> Import from pathofexile.com <small class="hint" style="margin:0">(your Characters tab must be public)</small></label>
         <label class="opt"><input type="radio" name="seed" value="hand"> Set by hand</label>
         <div class="row indent"><input type="number" id="taken" min="0" value="0"><span class="hint" id="takenHint" style="margin:0"></span></div>
         <div class="row indent" id="ascRow" hidden><input type="number" id="ascTaken" min="0" value="0" aria-label="Ascendancy points taken"><span class="hint" id="ascHint" style="margin:0"></span></div>
       </fieldset>
-      <div class="actions"><p class="err" id="saveErr"></p><button id="save" disabled>Save</button></div>
+      <div class="actions"><p class="err" id="saveErr"></p><button class="ghost" id="loCancel">Cancel</button><button id="save" disabled>Save</button></div>
     </div></div>
   </section>
 
@@ -743,7 +760,7 @@
     const asc = specs[Number($('spec').value)]
     if (asc?.ascendancy) $('ascHint').innerHTML = `of ${asc.asc_points} <b>${esc(asc.ascendancy)}</b> points taken`
   }
-  $('build').addEventListener('input', e => { if (e.target.id !== 'currentOnly' && !e.target.closest('.loadouts')) setDraft(true) })
+  $('loEdit').addEventListener('input', e => { if (e.target.id !== 'currentOnly') setDraft(true) })
 
   $('load').onclick = async () => {
     $('loadErr').textContent = ''; $('loaded').textContent = 'Loading…'; $('load').disabled = true
@@ -783,7 +800,7 @@
   }
   $('account').onkeydown = e => { if (e.key === 'Enter') $('find').click() }
 
-  $('charPick').onchange = () => { $('character').value = $('charPick').value; setDraft(true) }
+  $('charPick').onchange = () => { $('character').value = $('charPick').value; setDraft(true); keepChoice(false) }
   function showChars() {
     const current = chars.filter(c => c.current)
     const shown = $('currentOnly').checked ? current : chars
@@ -798,6 +815,7 @@
       ? `${shown.length} in ${leagues || 'the current league'}, ${chars.length} in all`
       : `${shown.length} characters`
     $('found').style.color = ''
+    keepChoice(false)
   }
   $('currentOnly').onchange = () => { remember('currentOnly', $('currentOnly').checked); if (chars.length) showChars() }
   $('currentOnly').checked = recall('currentOnly') !== 'false'
@@ -817,20 +835,25 @@
 
   $('save').onclick = async () => {
     $('saveErr').textContent = ''
+    if (!$('loName').value.trim()) { $('saveErr').textContent = 'Give this loadout a name.'; $('loName').focus(); return }
     if (!$('character').value.trim()) { $('saveErr').textContent = 'Type your character name.'; return }
     const importing = seed() === 'import'
     if (importing && !$('account').value.trim()) { $('saveErr').textContent = 'Type your account name, or set the points by hand.'; return }
     $('save').disabled = true; $('save').textContent = importing ? 'Importing…' : 'Save'
     try {
+      const keep = seed() === 'keep'
       await invoke('save_setup', {
+        name: $('loName').value,
+        create: editing?.mode !== 'edit',
+        keep,
         spec: Number($('spec').value),
         account: $('account').value,
         character: $('character').value,
-        taken: importing ? null : Math.max(0, Math.min(order.length, Number($('taken').value) || 0)),
-        ascTaken: importing ? null : ascTaken(),
+        taken: importing || keep ? null : Math.max(0, Math.min(order.length, Number($('taken').value) || 0)),
+        ascTaken: importing || keep ? null : ascTaken(),
       })
       setDraft(false)
-      show('tree')
+      showList()
     } catch (e) {
       $('saveErr').textContent = importing && !String(e).includes('by hand') ? `${e} Or set the points by hand.` : e
     } finally {
@@ -848,7 +871,13 @@
     invoke('resync_character')
   }
   listen('resynced', e => synced(e.payload))
-  listen('resync_error', e => { synced(String(e.payload).startsWith('Re-sync needs') ? 'Needs your account' : 'Re-sync failed', true); setSeed('import'); $('saveErr').textContent = e.payload; show('build') })
+  // a Re-sync that needs the account opens the followed loadout's editor to type it
+  listen('resync_error', async e => {
+    synced(String(e.payload).startsWith('Re-sync needs') ? 'Needs your account' : 'Re-sync failed', true)
+    show('build')
+    if (editing?.mode !== 'edit') await openEditor('edit', activeLoadout())
+    setSeed('import'); $('saveErr').textContent = e.payload
+  })
 
   // the saved build as it stands, into the Build section (unless there's a draft) and Settings
   async function loadSetup(first) {
@@ -857,72 +886,43 @@
     showLog(s.log_path)
     if (document.activeElement !== $('points')) $('points').value = s.points
     $('sync').hidden = !hasBuild
-    if (draft) return
-    if (first) {
-      $('input').value = s.input
-      $('account').value = s.account
-      setSeed(s.account ? 'import' : 'hand')
-    }
+    // a tick or re-sync while editing the followed loadout shows in the editor
+    if (editing?.mode !== 'edit' || draft) return
+    known = s.known
     $('character').value = s.character
     if (document.activeElement !== $('taken')) $('taken').value = s.taken
     if (document.activeElement !== $('ascTaken')) $('ascTaken').value = s.asc_taken
-    if (hasBuild) {
-      $('loaded').textContent = `${s.specs.length} tree specs · shown on tree ${s.tree_version}`
-      await showSpecs(s.specs, s.spec)
-    }
   }
 
-  // ---- Loadouts: switching saves straight away; the fields below follow the new one ----
+
+  // ---- Loadouts: the list (click to follow), and the editor New, Duplicate and Edit open ----
   let loadoutList = []
+  let editing = null      // { mode: 'new' | 'copy' | 'edit', index } while the editor shows
+  let known = []          // Characters the app already tracks points for, lowercased
   const activeLoadout = () => loadoutList.findIndex(l => l.active)
   function showLoadouts(list) {
     loadoutList = list
-    $('loadout').innerHTML = list.map((l, i) => `<option value="${i}"${l.active ? ' selected' : ''}>${esc(l.name)}</option>`).join('')
-    $('loadoutDelete').disabled = list.length < 2
+    $('loRows').innerHTML = list.map((l, i) => `<div class="lo-row${l.active ? ' active' : ''}">
+        <button class="lo-use" data-use="${i}" title="${l.active ? 'You are following this loadout' : 'Follow this loadout'}"><b>${esc(l.name)}</b><span>${esc(l.character || 'no character yet')} · ${esc(l.spec || 'no build yet')}</span></button>
+        ${l.active ? '<span class="tag">Following</span>' : ''}
+        <button class="ghost" data-edit="${i}">Edit</button>
+        <button class="ghost" data-copy="${i}"${l.spec ? '' : ' disabled title="No build to copy yet"'}>Duplicate</button>
+        <button class="ghost" data-del="${i}"${list.length < 2 ? ' disabled title="Your only loadout"' : ''}>Delete</button>
+      </div>`).join('')
+    const cur = list[activeLoadout()]
+    $('curLoadout').hidden = !cur
+    if (cur) { $('curName').textContent = cur.name; $('curWho').textContent = [cur.character, cur.spec].filter(Boolean).join(' · ') }
   }
-  const loadoutMsg = t => { $('loadoutMsg').textContent = t; if (t) setTimeout(() => { if ($('loadoutMsg').textContent === t) $('loadoutMsg').textContent = '' }, 2500) }
-  // a draft belongs to the loadout it was typed in: switching drops it
-  const leaveDraft = () => !draft || confirm('Your unsaved changes in the Build section will be lost. Switch anyway?')
-  $('loadout').onchange = async () => {
-    const i = Number($('loadout').value)
-    if (!leaveDraft()) { $('loadout').value = activeLoadout(); return }
-    try { await invoke('switch_loadout', { index: i }) } catch (e) { loadoutMsg(String(e)) }
-  }
-  $('loadoutNew').onclick = () => { if (leaveDraft()) invoke('new_loadout', { copy: false }) }
-  $('loadoutCopy').onclick = () => { if (leaveDraft()) invoke('new_loadout', { copy: true }) }
-  $('loadoutRename').onclick = () => {
-    const box = $('loadoutName'), i = activeLoadout()
-    box.value = loadoutList[i]?.name ?? ''
-    box.hidden = false; $('loadout').hidden = true
-    box.focus(); box.select()
-  }
-  async function finishRename(keep) {
-    const box = $('loadoutName')
-    if (box.hidden) return
-    box.hidden = true; $('loadout').hidden = false
-    if (!keep) return
-    try { showLoadouts(await invoke('rename_loadout', { index: activeLoadout(), name: box.value })); loadoutMsg('Renamed') } catch (e) { loadoutMsg(String(e)) }
-  }
-  $('loadoutName').onkeydown = e => { if (e.key === 'Enter') finishRename(true); if (e.key === 'Escape') finishRename(false) }
-  $('loadoutName').onblur = () => finishRename(true)
-  $('loadoutDelete').onclick = async () => {
-    const i = activeLoadout()
-    if (!confirm(`Delete the loadout "${loadoutList[i]?.name}"? The Character's progress stays.`)) return
-    try { await invoke('delete_loadout', { index: i }) } catch (e) { loadoutMsg(String(e)) }
-  }
-  listen('loadouts', e => {
-    const was = activeLoadout()
-    showLoadouts(e.payload)
-    // another loadout is active: the Build section shows its build, not the old draft
-    if (was !== -1 && was !== activeLoadout()) {
-      setDraft(false)
-      resetBuildForm()
-      loadSetup(true)
-      loadoutMsg('Switched')
-    }
-  })
+  listen('loadouts', e => showLoadouts(e.payload))
   invoke('loadouts').then(showLoadouts)
-  // empties what the last loadout's build filled in; loadSetup fills it again from the new one
+  $('curLoadout').onclick = () => { if (!editing) showList(); show('build') }
+
+  function showList() {
+    editing = null
+    $('loEdit').hidden = true; $('loList').hidden = false
+    $('loErr').textContent = ''
+  }
+  // empties the editor; fillEditor fills it from what the backend staged
   function resetBuildForm() {
     $('loadErr').textContent = ''; $('saveErr').textContent = ''; $('loaded').textContent = ''
     specs = []; order = []
@@ -934,6 +934,66 @@
     $('charPick').hidden = true; $('character').hidden = false; $('found').textContent = ''
     $('taken').value = 0; $('ascTaken').value = 0
   }
+  async function fillEditor(s) {
+    known = s.known
+    $('loName').value = s.name
+    $('input').value = s.input
+    $('account').value = s.account
+    $('character').value = s.character
+    $('taken').value = s.taken; $('ascTaken').value = s.asc_taken
+    keepChoice(true)
+    if (s.specs.length) {
+      $('loaded').textContent = `${s.specs.length} tree specs · shown on tree ${s.tree_version}`
+      await showSpecs(s.specs, s.spec)
+    }
+  }
+  async function openEditor(mode, index) {
+    if (draft && editing && !confirm('Your unsaved changes will be lost. Continue?')) return
+    try {
+      const s = await invoke('open_editor', { mode, index })
+      editing = { mode, index }
+      setDraft(false)
+      resetBuildForm()
+      $('loTitle').textContent = mode === 'edit' ? `Edit ${s.name}` : mode === 'copy' ? 'Duplicate loadout' : 'New loadout'
+      $('loList').hidden = true; $('loEdit').hidden = false
+      await fillEditor(s)
+      // a copy is new until saved
+      if (mode !== 'edit') setDraft(true)
+      ;(mode === 'edit' ? $('input') : $('loName')).focus()
+      if (mode !== 'edit') $('loName').select()
+    } catch (e) { $('loErr').textContent = String(e) }
+  }
+  function leaveEditor() {
+    if (draft && !confirm('Your unsaved changes will be lost. Leave anyway?')) return
+    invoke('close_editor')
+    setDraft(false)
+    showList()
+  }
+  $('loBack').onclick = leaveEditor
+  $('loCancel').onclick = leaveEditor
+  $('loNew').onclick = () => openEditor('new', activeLoadout())
+  $('loRows').onclick = async e => {
+    const b = e.target.closest('button'); if (!b || b.disabled) return
+    const d = b.dataset
+    if (d.use !== undefined) {
+      try { await invoke('switch_loadout', { index: Number(d.use) }) } catch (err) { $('loErr').textContent = String(err) }
+    }
+    if (d.edit !== undefined) openEditor('edit', Number(d.edit))
+    if (d.copy !== undefined) openEditor('copy', Number(d.copy))
+    if (d.del !== undefined) {
+      const i = Number(d.del)
+      if (!confirm(`Delete the loadout "${loadoutList[i]?.name}"? The Character's progress stays.`)) return
+      try { await invoke('delete_loadout', { index: i }) } catch (err) { $('loErr').textContent = String(err) }
+    }
+  }
+  // "Keep tracked points" is offered only for a Character the app already tracks
+  function keepChoice(opening) {
+    const can = known.includes($('character').value.trim().toLowerCase())
+    $('keepOpt').hidden = !can
+    if (opening) setSeed(can ? 'keep' : $('account').value ? 'import' : 'hand')
+    else if (!can && seed() === 'keep') setSeed($('account').value ? 'import' : 'hand')
+  }
+  $('character').addEventListener('input', () => keepChoice(false))
 
   // ---- Settings: each change saves straight away ----
   let pointsTimer = 0
@@ -1020,9 +1080,11 @@
     invoke('app_info').then(i => { version = i.version; $('version').textContent = `v${version}`; showUpdate(i.update) }),
     loadTree(),
     loadSetup(true),
+    invoke('loadouts').then(showLoadouts),
   ]).finally(() => {
     banners()
     if (!current) show(hasBuild ? (recall('section') || 'tree') : 'build')
+    if (!hasBuild && loadoutList.length <= 1) openEditor('edit', Math.max(0, activeLoadout()))
   })
 </script>
 </body>

@@ -88,6 +88,8 @@ pub struct CharacterState {
 pub struct LoadoutEntry {
     pub name: String,
     pub character: String,
+    /// the followed Tree spec's title, empty with no Build
+    pub spec: String,
     pub active: bool,
 }
 
@@ -140,6 +142,31 @@ impl Saved {
             self.stash();
         }
         self.active = self.active.min(self.loadouts.len() - 1);
+        // every Loadout has a name: ones from before get the one they were shown with
+        self.stash();
+        for l in &mut self.loadouts {
+            if l.name.trim().is_empty() {
+                l.name = loadout_name(l);
+            }
+        }
+    }
+
+    /// The Characters the app already tracks points for, lowercased.
+    pub fn known_characters(&self) -> Vec<String> {
+        let mut known: Vec<String> = self.characters.keys().cloned().collect();
+        if !self.character.is_empty() && !known.contains(&self.character.to_lowercase()) {
+            known.push(self.character.to_lowercase());
+        }
+        known.sort();
+        known
+    }
+
+    /// The points the app tracks for `character`, if it tracks any.
+    pub fn tracked(&self, character: &str) -> Option<CharacterState> {
+        if !self.character.is_empty() && self.character.eq_ignore_ascii_case(character) {
+            return Some(CharacterState { allocated: self.allocated.clone(), league: self.league.clone() });
+        }
+        self.characters.get(&character.to_lowercase()).cloned()
     }
 
     /// Writes the active Loadout's fields, and its Character's state, back to their snapshots.
@@ -236,7 +263,12 @@ impl Saved {
         self.loadouts
             .iter()
             .enumerate()
-            .map(|(i, l)| LoadoutEntry { name: loadout_name(l), character: l.character.clone(), active: i == active })
+            .map(|(i, l)| LoadoutEntry {
+                name: loadout_name(l),
+                character: l.character.clone(),
+                spec: l.build.as_ref().and_then(|b| b.specs.get(l.spec)).map(|s| s.title.clone()).unwrap_or_default(),
+                active: i == active,
+            })
             .collect()
     }
 }
@@ -310,7 +342,8 @@ mod tests {
         let mut s = named("Shiefire", &[1, 2]);
         assert_eq!(s.loadouts.len(), 1);
         assert_eq!(s.loadouts[0].input, "build-a");
-        assert_eq!(s.loadout_list(), [LoadoutEntry { name: "Shiefire · no build yet".into(), character: "Shiefire".into(), active: true }]);
+        assert_eq!(s.loadout_list(), [LoadoutEntry { name: "Shiefire · no build yet".into(), character: "Shiefire".into(), spec: String::new(), active: true }]);
+        assert_eq!(s.loadouts[0].name, "Shiefire · no build yet");
     }
 
     #[test]
@@ -328,6 +361,18 @@ mod tests {
         assert_eq!(s.input, "build-a");
         s.switch_to(1).unwrap();
         assert_eq!(s.input, "build-b");
+    }
+
+    #[test]
+    fn tracked_points_come_from_the_active_character_or_the_stash() {
+        let mut s = named("Shiefire", &[1, 2]);
+        s.new_loadout(false);
+        s.character = "Other".into();
+        s.allocated = vec![9];
+        assert_eq!(s.tracked("shiefire").unwrap().allocated, [1, 2]);
+        assert_eq!(s.tracked("OTHER").unwrap().allocated, [9]);
+        assert!(s.tracked("nobody").is_none());
+        assert_eq!(s.known_characters(), ["other", "shiefire"]);
     }
 
     #[test]

@@ -18,7 +18,7 @@ _Avoid_: Gear set, loadout
 
 **Allocated node**: A passive tree node the player's character currently has.
 
-**Loadout**: A named pairing of a Character and a Build, with the Tree spec, Skill set and Item set chosen for it. The player can keep several, including several for the same Character, and follows one at a time. What belongs to the Character in the game (its Allocated nodes, league and place in the Leveling guide) is shared by all of that Character's Loadouts. When the Client log shows another Character levelling up, the app switches to that Character's most recently used Loadout, if it has one.
+**Loadout**: A named pairing of a Character and a Build (every Loadout has a name), with the Tree spec, Skill set and Item set chosen for it. The player can keep several, including several for the same Character, and follows one at a time. What belongs to the Character in the game (its Allocated nodes, league and place in the Leveling guide) is shared by all of that Character's Loadouts. When the Client log shows another Character levelling up, the app switches to that Character's most recently used Loadout, if it has one.
 _Avoid_: Profile, build slot. (A Skill set or an Item set is never a Loadout.)
 
 **Character**: The player's in-game character the app follows, named in the current Loadout. Every allocation in the Client log is credited to it, except while the log's latest level-up names a different character; then ticking pauses until the Character levels up again or the player re-syncs.
