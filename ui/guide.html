@@ -62,9 +62,8 @@
 
   const load = () => invoke('guide_view').then(v => { view = v; render() })
   load()
+  // also sent for another Character's progress and a new Tree spec's class
   listen('guide', load)
-  // another Character's progress
-  listen('plan', load)
   const useBinds = b => { if (b.guide_toggle) hotkey = KeyLabel.format(b.guide_toggle); render() }
   invoke('key_binds').then(useBinds)
   listen('binds', e => useBinds(e.payload))

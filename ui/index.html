@@ -19,6 +19,7 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hd span { font: 600 13px var(--body); font-variant-numeric: tabular-nums; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; max-width: 60%; }
   .hd span b { font-weight: 600; color: var(--ink); }
+  .hd .zm { font-style: normal; }
   /* something the player must act on: points have stopped ticking, or the hotkey can't work */
   .banner { display: flex; gap: 7px; padding: 7px 9px; border-radius: 6px; font-size: 13px; line-height: 1.4;
     color: var(--ink); background: rgba(224, 74, 63, .12); border: 1px solid rgba(224, 74, 63, .45); }
@@ -104,14 +105,22 @@
     const notes = v.notices.length ? `<span class="note">${v.notices.map(esc).join(' · ')}</span>` : ''
     const stopped = v.stopped ? `<div class="banner">${icon.pause}<span>${esc(v.stopped)}</span></div>` : ''
     const who = v.character ? `<b>${esc(v.character)}</b> · ` : ''
-    const zoom = cam.zoom > 1 ? ` · ×${cam.zoom.toFixed(1)}` : ''
     const tree = MiniTree.draw(v, 392, 0.72, cam)
     panel.innerHTML = `
-      <div class="hd" title="${esc(v.spec)} · drag to move the panel"><h1>${esc(v.spec)}</h1><span>${who}${v.done} / ${v.total}${zoom}</span></div>
+      <div class="hd" title="${esc(v.spec)} · drag to move the panel"><h1>${esc(v.spec)}</h1><span>${who}${v.done} / ${v.total}<i class="zm">${zoomText()}</i></span></div>
       <div class="bar"><i style="width:${v.total ? 100 * v.done / v.total : 0}%"></i></div>
       ${stopped}${warn}
       <div class="stage${v.stopped ? ' stopped' : ''}">${tree}${v.asc ? MiniTree.inset(v.asc, 140, { pending: v.pending }) : ''}</div>
       <div class="meta">${legend}${refunds}${pendingNote}${notes}<span class="keys">${hotkey} hide · scroll to zoom, drag to move · drag the title to move the panel</span></div>`
+  }
+
+  const zoomText = () => cam.zoom > 1 ? ` · ×${cam.zoom.toFixed(1)}` : ''
+  // zooming and panning redraw only the Mini-tree, not the whole panel
+  function redrawTree() {
+    const stage = panel.querySelector('.stage'), zm = panel.querySelector('.hd .zm')
+    if (!stage || !zm || !view || view.error || !view.total) return render(view)
+    stage.innerHTML = MiniTree.draw(view, 392, 0.72, cam) + (view.asc ? MiniTree.inset(view.asc, 140, { pending: view.pending }) : '')
+    zm.textContent = zoomText()
   }
 
   let view = null
@@ -138,9 +147,9 @@
   const useBinds = b => { hotkey = KeyLabel.format(b.toggle); render(view) }
   invoke('key_binds').then(useBinds)
   listen('binds', e => useBinds(e.payload))
-  listen('zoom', e => { MiniTree.key(cam, e.payload); keepZoom(); render(view) })
-  listen('pan', e => { MiniTree.pan(cam, e.payload); render(view) })
-  MiniTree.attach(panel, cam, () => render(view), keepZoom)
+  listen('zoom', e => { MiniTree.key(cam, e.payload); keepZoom(); redrawTree() })
+  listen('pan', e => { MiniTree.pan(cam, e.payload); redrawTree() })
+  MiniTree.attach(panel, cam, redrawTree, keepZoom)
 
   // dragging the title moves the panel within the game window; the app remembers the spot
   let moving = null
@@ -150,10 +159,17 @@
     panel.setPointerCapture(e.pointerId)
     invoke('drag_panel', { phase: 'start', dx: 0, dy: 0 })
   })
+  // at most one move per frame: pointer events can come faster than the window can follow
+  let moveQueued = false
   panel.addEventListener('pointermove', e => {
     if (!moving) return
     moving.dx = e.screenX - moving.x; moving.dy = e.screenY - moving.y
-    invoke('drag_panel', { phase: 'move', dx: moving.dx, dy: moving.dy })
+    if (moveQueued) return
+    moveQueued = true
+    requestAnimationFrame(() => {
+      moveQueued = false
+      if (moving) invoke('drag_panel', { phase: 'move', dx: moving.dx, dy: moving.dy })
+    })
   })
   // a drag that ends without a pointerup (capture lost) still ends, where it last was,
   // or the app would think it's still dragging and stop placing the panel

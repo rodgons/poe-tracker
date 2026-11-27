@@ -98,7 +98,6 @@
   const load = () => invoke('gems_view').then(v => { view = v; render() }, () => render())
   load()
   listen('gems', load)
-  listen('plan', load)
   const useBinds = b => { if (b.gem_toggle) hotkey = KeyLabel.format(b.gem_toggle); render() }
   invoke('key_binds').then(useBinds)
   listen('binds', e => useBinds(e.payload))

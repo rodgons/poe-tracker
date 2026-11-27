@@ -1154,8 +1154,13 @@
 
   // ---- load ----
   const loadTree = () => invoke('build_view').then(d => { data = d; renderTree(); banners() })
-  // any change to the plan (a tick, a re-sync, a new spec, new settings) reloads what shows it
-  listen('plan', () => { loadTree(); loadSetup(false); if (current === 'gems') loadGems(); if (current === 'guide') loadGuide(false) })
+  // any change to the plan (a tick, a re-sync, a new spec, new settings) reloads what shows it;
+  // the gems and guide have events of their own. While the window is hidden (closed to the
+  // tray, playing) the reload waits until it shows again.
+  let planStale = false
+  const reloadPlan = () => { loadTree(); loadSetup(false) }
+  listen('plan', () => { if (document.hidden) planStale = true; else reloadPlan() })
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && planStale) { planStale = false; reloadPlan() } })
   listen('binds', e => { binds = e.payload; showBinds() })
   listen('status', e => { if (e.payload.permission !== permission) { permission = e.payload.permission; banners() } })
 
