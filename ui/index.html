@@ -77,7 +77,7 @@
     pause: '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="2" width="2.5" height="8" rx=".5" fill="var(--refund)"/><rect x="7" y="2" width="2.5" height="8" rx=".5" fill="var(--refund)"/></svg>',
     warn: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.2 11 10.4H1z" fill="none" stroke="var(--refund)" stroke-width="1.3" stroke-linejoin="round"/><path d="M6 4.6v2.8" stroke="var(--refund)" stroke-width="1.3" stroke-linecap="round"/><circle cx="6" cy="8.9" r=".7" fill="var(--refund)"/></svg>',
   }
-  const pointsTo = (where) => `Open <b>${where}</b> from the POE Tracker menu bar / tray icon.`
+  const pointsTo = (where) => `Open POE Tracker from the menu bar / tray icon and go to <b>${where}</b>.`
   function render(v) {
     const panel = document.getElementById('panel')
     const warn = permission.includes('NOT')
@@ -88,15 +88,15 @@
       return
     }
     if (!v) {
-      panel.innerHTML = `${warn}<p class="empty"><b>No build yet.</b> ${pointsTo('Set up build…')}</p>`
+      panel.innerHTML = `${warn}<p class="empty"><b>No build yet.</b> ${pointsTo('Build')}</p>`
       return
     }
     if (v.error) {
-      panel.innerHTML = `${warn}<p class="empty"><b>Can't draw ${esc(v.spec)}.</b> ${esc(v.error)} Pick another tree spec in <b>Open tree…</b>, or paste the build again in <b>Set up build…</b></p>`
+      panel.innerHTML = `${warn}<p class="empty"><b>Can't draw ${esc(v.spec)}.</b> ${esc(v.error)} Pick another tree spec in the <b>Tree</b> section, or paste the build again in <b>Build</b>.</p>`
       return
     }
     if (!v.total) {
-      panel.innerHTML = `${warn}<p class="empty"><b>${esc(v.spec)} has no points to show.</b> Pick another tree spec in <b>Open tree…</b></p>`
+      panel.innerHTML = `${warn}<p class="empty"><b>${esc(v.spec)} has no points to show.</b> Pick another tree spec in the <b>Tree</b> section.</p>`
       return
     }
     const sw = MiniTree.swatch
@@ -104,7 +104,7 @@
     const mark = (kind, text) => `<span>${sw(kind)}${text}</span>`
     const legend = v.next.length
       ? `<div class="legend">${mark('next', `next ${v.next.length}`)}${mark('taken', 'taken')}${v.refunds.length ? mark('refund', 'refund') : ''}${pending ? mark('pending', 'pending refund') : ''}${mark('later', 'later')}</div>`
-      : `<span style="color:var(--alloc)">Spec complete${v.next_spec ? ` — next: ${esc(v.next_spec)}. Switch in Open tree…` : ''}</span>`
+      : `<span style="color:var(--alloc)">Spec complete${v.next_spec ? ` — next: ${esc(v.next_spec)}. Switch in the Tree section.` : ''}</span>`
     const refunds = v.refunds.length ? `<span class="refund">${sw('refund')}Refund: ${v.refunds.map(esc).join(', ')}</span>` : ''
     const pendingNote = v.pending_note ? `<span class="pending">${sw('pending')}Pending refund: ${esc(v.pending_note)}</span>` : ''
     const notes = v.notices.length ? `<span class="note">${v.notices.map(esc).join(' · ')}</span>` : ''

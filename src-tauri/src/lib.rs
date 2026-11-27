@@ -9,11 +9,12 @@ use std::{
     time::Duration,
 };
 use tauri::{
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, State, WebviewWindow,
 };
 
+mod changelog;
 mod clientlog;
 mod foreground;
 mod gamewin;
@@ -21,6 +22,7 @@ mod gems;
 mod guide;
 mod items;
 mod keys;
+mod layouts;
 #[cfg(target_os = "macos")]
 mod macos;
 mod placement;
@@ -51,10 +53,17 @@ struct App {
     refund_unchecked: bool,
     /// a downloaded update's version, waiting for a restart
     update_ready: Option<String>,
+    /// a newer version found while the app runs, not downloaded until the player asks
+    update_offer: Option<tauri_plugin_updater::Update>,
+    /// what's new since the version the player last ran, until they close the pop-up
+    whats_new: Vec<changelog::Entry>,
     /// the Character's socketed gems from the last items import
     gems: Gems,
     /// the area the player is in and its level, from the log
     area: Option<(String, u32)>,
+    /// that area instance's seed, and the Zone layout picked in each area's instance
+    seed: u64,
+    picks: layouts::Picks,
     /// this season's softcore league, for Trade links before a Character's league is known
     season_league: Option<String>,
     season_tried: bool,
@@ -111,6 +120,11 @@ struct Loaded {
 
 #[derive(Serialize)]
 struct Setup {
+    /// the Loadout's name; empty for a new one
+    name: String,
+    /// the Characters the app already tracks points for (lowercased), so the Build
+    /// section can offer to keep them
+    known: Vec<String>,
     input: String,
     account: String,
     character: String,
@@ -128,21 +142,14 @@ struct Setup {
 
 pub enum Msg {
     Hotkey,
-    Esc,
     /// +1 in, -1 out, 0 back to the whole spec
     Zoom(i8),
     /// move the zoomed Mini-tree view: (x, y) steps
     Pan(i8, i8),
-    /// the tray's Show/Hide panel item
-    TogglePanel,
     /// the Gem panel hotkey
     GemHotkey,
-    /// the tray's Show/Hide gem panel item
-    ToggleGemPanel,
     /// the Guide panel hotkey
     GuideHotkey,
-    /// the tray's Show/Hide guide panel item
-    ToggleGuidePanel,
     /// the frontmost app, and its window frame when it's the game
     Frontmost(String, Option<gamewin::Frame>),
     /// the player saved new key binds
@@ -522,14 +529,7 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                 key = "panel hotkey";
                 visible = !visible;
             }
-            Msg::Esc if visible || gems_visible || guide_visible => {
-                key = "Esc";
-                visible = false;
-                gems_visible = false;
-                guide_visible = false;
-            }
-            Msg::TogglePanel if in_poe || visible => visible = !visible,
-            Msg::GemHotkey | Msg::ToggleGemPanel if in_poe || gems_visible => {
+            Msg::GemHotkey if in_poe || gems_visible => {
                 key = "gem panel hotkey";
                 gems_visible = !gems_visible;
                 // opening it brings the gems up to date, at most once a minute
@@ -537,7 +537,7 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                     import_gems(&app, false);
                 }
             }
-            Msg::GuideHotkey | Msg::ToggleGuidePanel if in_poe || guide_visible => {
+            Msg::GuideHotkey if in_poe || guide_visible => {
                 key = "guide panel hotkey";
                 guide_visible = !guide_visible;
             }
@@ -685,6 +685,15 @@ fn on_log_line(handle: &AppHandle, line: &str) {
     let t = tree::tree();
     let changed = match event {
         clientlog::Event::LevelUp { character, level } => {
+            // another Character with a Loadout of its own: follow it there
+            if !character.eq_ignore_ascii_case(&app.saved.character) {
+                if let Some(i) = app.saved.latest_for(&character) {
+                    if app.saved.switch_to(i).is_ok() {
+                        app.playing = Some(character.clone());
+                        switched(handle, app);
+                    }
+                }
+            }
             if character.eq_ignore_ascii_case(&app.saved.character) {
                 app.saved.guide_mut().level = Some(level);
                 let _ = store::save(&app.path, &app.saved);
@@ -724,8 +733,10 @@ fn on_log_line(handle: &AppHandle, line: &str) {
                 _ => false,
             }
         }
-        clientlog::Event::Entered { area, level } => {
+        clientlog::Event::Entered { area, level, seed } => {
             app.area = Some((area.clone(), level));
+            app.seed = seed;
+            app.picks.entered(&area, seed);
             // the log handler holds the state: import once it lets go
             let h = handle.clone();
             std::thread::spawn(move || import_gems(&h, false));
@@ -832,15 +843,20 @@ fn spec_order(spec: usize, state: State<'_, AppState>) -> Result<Vec<String>, St
 
 #[tauri::command]
 fn current_setup(state: State<'_, AppState>) -> Setup {
-    let app = state.lock().unwrap();
+    current_setup_of(&state.lock().unwrap())
+}
+
+fn current_setup_of(app: &App) -> Setup {
     let saved = &app.saved;
     Setup {
+        name: saved.loadouts.get(saved.active).map(|l| l.name.clone()).unwrap_or_default(),
+        known: saved.known_characters(),
         input: saved.input.clone(),
         account: saved.account.clone(),
         character: saved.character.clone(),
         spec: saved.spec,
-        taken: panel_view_of(&app).map_or(0, |v| v.done),
-        asc_taken: panel_view_of(&app).and_then(|v| v.asc).map_or(0, |a| a.done),
+        taken: panel_view_of(app).map_or(0, |v| v.done),
+        asc_taken: panel_view_of(app).and_then(|v| v.asc).map_or(0, |a| a.done),
         points: saved.points,
         specs: saved.build.as_ref().map(spec_choices).unwrap_or_default(),
         tree_version: tree::tree().version.clone(),
@@ -907,7 +923,11 @@ async fn find_characters(account: String) -> Result<Vec<poeapi::Character>, Stri
 /// Saves the setup. With `taken` the Seed is the first points in order (and the first
 /// `asc_taken` Ascendancy points); without, it's imported from pathofexile.com.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn save_setup(
+    name: String,
+    create: bool,
+    keep: bool,
     spec: usize,
     account: String,
     character: String,
@@ -917,9 +937,19 @@ async fn save_setup(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (account, character) = (account.trim().to_string(), character.trim().to_string());
-    let (chosen, kept) = {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("Give this loadout a name.".into());
+    }
+    let (chosen, kept, tracked) = {
         let st = state.lock().unwrap();
-        let build = st.pending.as_ref().map(|(_, b)| b).or(st.saved.build.as_ref()).ok_or("Load a build first.")?;
+        // a new Loadout has only the build loaded for it, never the active one's
+        let saved_build = if create { None } else { st.saved.build.as_ref() };
+        let build = st.pending.as_ref().map(|(_, b)| b).or(saved_build).ok_or("Load a build first.")?;
+        let tracked = st.saved.tracked(&character);
+        if keep && tracked.is_none() {
+            return Err(format!("The app has no points for {character} yet: import them or set them by hand."));
+        }
         // re-saving the same spec with the taken count as it stands (say, to fix the
         // character name) keeps the exact points, not the first ones in order
         let view = panel_view_of(&st);
@@ -928,7 +958,8 @@ async fn save_setup(
             && taken.is_some()
             && taken == view.as_ref().map(|v| v.done)
             && asc_taken.unwrap_or(0) == view.and_then(|v| v.asc).map_or(0, |a| a.done);
-        (build.specs.get(spec).ok_or("Pick a tree spec.")?.clone(), unchanged.then(|| st.saved.allocated.clone()))
+        let kept = if keep { tracked.as_ref().map(|t| t.allocated.clone()) } else { unchanged.then(|| st.saved.allocated.clone()) };
+        (build.specs.get(spec).ok_or("Pick a tree spec.")?.clone(), kept, tracked)
     };
     let allocated = match (kept, taken) {
         (Some(kept), _) => kept,
@@ -947,6 +978,10 @@ async fn save_setup(
     };
     let mut guard = state.lock().unwrap();
     let st = &mut *guard;
+    if create {
+        st.saved.new_loadout(false);
+        st.gems = Gems::default();
+    }
     let new_build = st.pending.is_some();
     if let Some((input, build)) = st.pending.take() {
         st.saved.input = input;
@@ -960,20 +995,24 @@ async fn save_setup(
     // another Character's gems and league aren't this one's
     if character != st.saved.character || account != st.saved.account {
         st.gems = Gems::default();
-        st.saved.league.clear();
+        st.saved.league = tracked.map(|t| t.league).unwrap_or_default();
     }
     st.saved.spec = spec;
     st.saved.account = account;
     st.saved.character = character;
     st.saved.allocated = allocated;
+    let active = st.saved.active;
+    st.saved.rename_loadout(active, &name)?;
     st.refunding.clear();
     st.refund_unchecked = false;
     // saving (or re-syncing) says the Character is the one playing
     st.playing = None;
     st.synced = None;
-    store::save(&st.path, &st.saved)?;
+    loadouts_changed(&app, st)?;
     let _ = app.emit("plan", panel_view_of(st));
     drop(guard);
+    let _ = app.emit("items", ());
+    let _ = app.emit("guide", ());
     let _ = app.emit("gems", ());
     import_gems(&app, true);
     Ok(())
@@ -1001,11 +1040,45 @@ struct AppInfo {
     version: String,
     /// a downloaded update, waiting for a restart
     update: Option<String>,
+    /// a newer version the player can update to now
+    available: Option<String>,
 }
 
 #[tauri::command]
 fn app_info(app: AppHandle, state: State<'_, AppState>) -> AppInfo {
-    AppInfo { version: app.package_info().version.to_string(), update: state.lock().unwrap().update_ready.clone() }
+    let st = state.lock().unwrap();
+    AppInfo {
+        version: app.package_info().version.to_string(),
+        update: st.update_ready.clone(),
+        available: st.update_offer.as_ref().map(|u| u.version.clone()),
+    }
+}
+
+/// What's new since the version the player last ran; empty once they've closed it.
+#[tauri::command]
+fn whats_new(state: State<'_, AppState>) -> Vec<changelog::Entry> {
+    let st = state.lock().unwrap();
+    st.whats_new.iter().map(|e| changelog::Entry { version: e.version.clone(), changes: e.changes.clone() }).collect()
+}
+
+/// The player closed the What's new pop-up: it won't show again until the next version.
+#[tauri::command]
+fn whats_new_seen(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut st = state.lock().unwrap();
+    st.whats_new.clear();
+    st.saved.seen_version = app.package_info().version.to_string();
+    store::save(&st.path, &st.saved)
+}
+
+/// The player asked to update now: download and install the offered version, then restart
+/// into it. (On Windows the installer closes the app itself.)
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    let update = app.state::<AppState>().lock().unwrap().update_offer.clone().ok_or("No update to install.")?;
+    let _ = app.emit("update_progress", format!("Downloading v{}…", update.version));
+    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| format!("The update failed: {e}"))?;
+    let _ = app.emit("update_progress", "Restarting…");
+    app.restart();
 }
 
 #[tauri::command]
@@ -1174,6 +1247,9 @@ struct GuideView {
     area_level: Option<u32>,
     /// the Build has gems the guide can pick (false: no Build, or no gem the route gives)
     gems: bool,
+    /// the Zone layouts of the zone the Character is in, for the current step; None in zones
+    /// without them, before the first area change and once the campaign is done
+    layout: Option<layouts::LayoutView>,
 }
 
 #[tauri::command]
@@ -1194,7 +1270,12 @@ fn guide_view(state: State<'_, AppState>) -> GuideView {
         Some((last, level))
     });
     let area_level = area.filter(|(id, _)| !route.is_town(id)).map(|(_, level)| level);
+    let layout = st.area.as_ref().and_then(|(id, _)| {
+        let name = &route.areas.get(id)?.name;
+        layouts::view(id, name, steps.get(progress.step)?, st.picks.get(id, st.seed))
+    });
     GuideView {
+        layout,
         step: progress.step.min(steps.len()),
         steps,
         options: progress.options,
@@ -1244,6 +1325,18 @@ fn guide_jump(step: usize, app: AppHandle, state: State<'_, AppState>) -> Result
     drop(st);
     let _ = app.emit("guide", ());
     Ok(())
+}
+
+/// The player picking a Zone layout (or a start picture on the way to one) in the Guide panel;
+/// None goes back to the first pick. It holds until the Character enters a new instance.
+#[tauri::command]
+fn layout_pick(pick: Option<String>, app: AppHandle, state: State<'_, AppState>) {
+    let mut st = state.lock().unwrap();
+    let Some((area, _)) = st.area.clone() else { return };
+    let seed = st.seed;
+    st.picks.set(&area, seed, pick);
+    drop(st);
+    let _ = app.emit("guide", ());
 }
 
 /// New route switches. The guide keeps its place by the area the current step heads to,
@@ -1319,7 +1412,7 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
         .account
         .is_empty()
         .then(|| format!("Switched to {title}: Re-sync character so your taken points count"));
-    store::save(&st.path, &st.saved)?;
+    loadouts_changed(&app, &mut st)?;
     let _ = app.emit("plan", panel_view_of(&st));
     let _ = app.emit("gems", ());
     Ok(())
@@ -1327,6 +1420,118 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
 
 /// Shows the Main window, at `section` ("tree", "gems", "guide", "build" or "settings") when given;
 /// otherwise the page picks (Build until a build is saved, then the last section used).
+/// After the active Loadout changed: the last one's runtime state goes, the new one's
+/// name shows, and every window catches up. The caller holds the state, so
+/// anything that locks it again runs on its own thread.
+fn switched(handle: &AppHandle, st: &mut App) {
+    st.pending = None;
+    st.gems = Gems::default();
+    st.refunding.clear();
+    st.refund_unchecked = false;
+    let name = st.saved.loadouts.get(st.saved.active).map(store::loadout_name).unwrap_or_default();
+    st.synced = Some(format!("Switched to {name}"));
+    let _ = store::save(&st.path, &st.saved);
+    let _ = handle.emit("plan", panel_view_of(st));
+    for event in ["gems", "items", "guide"] {
+        let _ = handle.emit(event, ());
+    }
+    let _ = handle.emit("loadouts", st.saved.loadout_list());
+    let h = handle.clone();
+    std::thread::spawn(move || {
+        upgrade_build(h.clone());
+        import_gems(&h, true);
+    });
+}
+
+/// Something about the Loadouts changed but not which is active: save and tell the windows.
+fn loadouts_changed(handle: &AppHandle, st: &mut App) -> Result<Vec<store::LoadoutEntry>, String> {
+    store::save(&st.path, &st.saved)?;
+    let list = st.saved.loadout_list();
+    let _ = handle.emit("loadouts", &list);
+    Ok(list)
+}
+
+#[tauri::command]
+fn loadouts(state: State<'_, AppState>) -> Vec<store::LoadoutEntry> {
+    state.lock().unwrap().saved.loadout_list()
+}
+
+fn switch_loadout_to(handle: &AppHandle, index: usize) -> Result<(), String> {
+    let st = handle.state::<AppState>();
+    let mut st = st.lock().unwrap();
+    if index == st.saved.active {
+        return Ok(());
+    }
+    st.saved.switch_to(index)?;
+    switched(handle, &mut st);
+    Ok(())
+}
+
+/// Opens the Build section's editor: "new" starts empty for the active Character, "copy"
+/// starts from Loadout `index` (its build loaded, nothing saved until Save), "edit" switches to
+/// Loadout `index` and starts from it.
+#[tauri::command]
+fn open_editor(mode: String, index: usize, app: AppHandle) -> Result<Setup, String> {
+    if mode == "edit" {
+        switch_loadout_to(&app, index)?;
+    }
+    let st = app.state::<AppState>();
+    let mut st = st.lock().unwrap();
+    st.pending = None;
+    let mut setup = current_setup_of(&st);
+    match mode.as_str() {
+        "edit" => {}
+        "new" => {
+            setup.name = String::new();
+            setup.input = String::new();
+            setup.spec = 0;
+            setup.specs = Vec::new();
+            setup.taken = 0;
+            setup.asc_taken = 0;
+        }
+        "copy" => {
+            st.saved.stash();
+            let l = st.saved.loadouts.get(index).ok_or("No such loadout.")?.clone();
+            let build = l.build.clone().ok_or("That loadout has no build to copy.")?;
+            setup.name = format!("{} copy", l.name);
+            setup.input = l.input.clone();
+            setup.account = l.account.clone();
+            setup.character = l.character.clone();
+            setup.spec = l.spec;
+            setup.specs = spec_choices(&build);
+            setup.taken = 0;
+            setup.asc_taken = 0;
+            st.pending = Some((l.input, build));
+        }
+        _ => return Err("Unknown editor mode.".into()),
+    }
+    Ok(setup)
+}
+
+/// The editor closed without saving: forget the build loaded in it.
+#[tauri::command]
+fn close_editor(state: State<'_, AppState>) {
+    state.lock().unwrap().pending = None;
+}
+
+#[tauri::command]
+fn switch_loadout(index: usize, app: AppHandle) -> Result<(), String> {
+    switch_loadout_to(&app, index)
+}
+
+#[tauri::command]
+fn delete_loadout(index: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut st = state.lock().unwrap();
+    let was = st.saved.active;
+    st.saved.delete_loadout(index)?;
+    if index == was {
+        switched(&app, &mut st);
+    } else {
+        loadouts_changed(&app, &mut st)?;
+    }
+    Ok(())
+}
+
 fn open_main(app: &AppHandle, section: Option<&str>) {
     let Some(win) = app.get_webview_window("main") else { return };
     #[cfg(target_os = "macos")]
@@ -1342,24 +1547,83 @@ fn open_main(app: &AppHandle, section: Option<&str>) {
     let _ = win.set_focus();
 }
 
-/// Auto-update, once at launch: if GitHub has a newer release, download and install it, then
-/// restart into it straight away unless the Corner panel is showing. Then the tray menu offers
-/// the restart instead, so an update never takes the panel away mid-game. (On Windows the
-/// installer closes the app itself.) Any failure just leaves the current version running.
-async fn update(app: AppHandle, menu: Menu<tauri::Wry>) {
+/// The test-build update feed: CI's rolling `test-builds` release, whose latest.json always
+/// names the newest build, test prerelease or full release.
+const TEST_FEED: &str = "https://github.com/rodgons/poe-tracker/releases/download/test-builds/latest.json";
+
+/// The updater for this machine: the full releases everyone gets, or the test-build feed when
+/// the owner has put an empty `test-builds` file in the app's config folder (there is no switch
+/// in the app, so players never land on a test build by accident).
+fn updater_for(app: &AppHandle) -> tauri_plugin_updater::Result<tauri_plugin_updater::Updater> {
     use tauri_plugin_updater::UpdaterExt;
-    let updater = match app.updater() {
+    let wants_tests = app.path().app_config_dir().is_ok_and(|dir| dir.join("test-builds").exists());
+    if !wants_tests {
+        return app.updater();
+    }
+    let feed = tauri::Url::parse(TEST_FEED).expect("test feed URL");
+    app.updater_builder().endpoints(vec![feed])?.build()
+}
+
+/// How often the running app looks for a newer version.
+const UPDATE_EVERY: Duration = Duration::from_secs(30 * 60);
+
+/// Auto-update. At launch: if GitHub has a newer release, download and install it, then restart
+/// into it straight away unless a panel is showing; then the sidebar and the tray offer the
+/// restart instead, so an update never takes a panel away mid-game. (On Windows the installer
+/// closes the app itself.) After that, every half hour: a newer version is only offered (sidebar
+/// button, tray item), and downloaded when the player asks. Any failure leaves this version running.
+async fn update(app: AppHandle, menu: Menu<tauri::Wry>) {
+    let updater = match updater_for(&app) {
         Ok(updater) => updater,
         Err(e) => return eprintln!("updater unavailable: {e}"),
     };
-    let update = match updater.check().await {
-        Ok(Some(update)) => update,
-        Ok(None) => return,
-        Err(e) => return eprintln!("update check failed: {e}"),
-    };
-    if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
-        return eprintln!("update to {} failed: {e}", update.version);
+    match updater.check().await {
+        Ok(Some(update)) => match update.download_and_install(|_, _| {}, || {}).await {
+            Ok(()) => return downloaded(&app, &menu, &update.version),
+            Err(e) => eprintln!("update to {} failed: {e}", update.version),
+        },
+        Ok(None) => {}
+        Err(e) => eprintln!("update check failed: {e}"),
     }
+    let mut item: Option<MenuItem<tauri::Wry>> = None;
+    loop {
+        let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(UPDATE_EVERY)).await;
+        let update = match updater.check().await {
+            Ok(Some(update)) => update,
+            Ok(None) => continue,
+            Err(e) => {
+                eprintln!("update check failed: {e}");
+                continue;
+            }
+        };
+        let version = update.version.clone();
+        {
+            let st = app.state::<AppState>();
+            let mut st = st.lock().unwrap();
+            if st.update_offer.as_ref().is_some_and(|u| u.version == version) {
+                continue;
+            }
+            st.update_offer = Some(update);
+        }
+        let _ = app.emit("update_available", &version);
+        let label = format!("Update to v{version} now");
+        match &item {
+            Some(i) => {
+                let _ = i.set_text(label);
+            }
+            None => match MenuItem::with_id(&app, "update_now", label, true, None::<&str>) {
+                Ok(i) => {
+                    let _ = menu.insert(&i, 0);
+                    item = Some(i);
+                }
+                Err(e) => eprintln!("update menu item: {e}"),
+            },
+        }
+    }
+}
+
+/// An update installed at launch: restart into it now, or offer the restart while a panel shows.
+fn downloaded(app: &AppHandle, menu: &Menu<tauri::Wry>, version: &str) {
     let panel_shown = ["corner", GEM_PANEL, GUIDE_PANEL]
         .iter()
         .any(|l| app.get_webview_window(l).and_then(|w| w.is_visible().ok()).unwrap_or(false));
@@ -1367,11 +1631,11 @@ async fn update(app: AppHandle, menu: Menu<tauri::Wry>) {
         app.restart();
     }
     if let Some(st) = app.try_state::<AppState>() {
-        st.lock().unwrap().update_ready = Some(update.version.clone());
+        st.lock().unwrap().update_ready = Some(version.to_string());
     }
-    let _ = app.emit_to("main", "update_ready", &update.version);
-    let label = format!("Restart to update to v{}", update.version);
-    match MenuItem::with_id(&app, "update", label, true, None::<&str>) {
+    let _ = app.emit_to("main", "update_ready", version);
+    let label = format!("Restart to update to v{version}");
+    match MenuItem::with_id(app, "update", label, true, None::<&str>) {
         Ok(item) => {
             let _ = menu.insert(&item, 0);
         }
@@ -1452,18 +1716,40 @@ pub fn run() {
             open_trade,
             guide_view,
             guide_jump,
+            layout_pick,
+            loadouts,
+            switch_loadout,
+            delete_loadout,
+            open_editor,
+            close_editor,
             guide_options,
             copy_text,
             app_info,
             restart_to_update,
+            whats_new,
+            whats_new_seen,
+            install_update,
             open_input_monitoring
         ])
         .setup(|app| {
             let path = store::path(app.path().app_config_dir()?);
-            let saved = store::load(&path);
+            let mut saved = store::load(&path);
+            saved.ensure_loadout();
             keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default(), area: None, season_league: None, season_tried: false }));
+            // what's new since the last version run here; a fresh install starts with nothing to show
+            let current = app.package_info().version.to_string();
+            let whats_new = if first_run && saved.seen_version.is_empty() {
+                saved.seen_version = current.clone();
+                let _ = store::save(&path, &saved);
+                Vec::new()
+            } else if saved.seen_version != current {
+                changelog::since(changelog::bundled(), &saved.seen_version, &current)
+            } else {
+                Vec::new()
+            };
+            let show_whats_new = !whats_new.is_empty();
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, update_offer: None, whats_new, gems: Gems::default(), area: None, seed: 0, picks: layouts::Picks::default(), season_league: None, season_tried: false }));
             upgrade_build(app.handle().clone());
 
             #[cfg(target_os = "macos")]
@@ -1510,48 +1796,34 @@ pub fn run() {
             }
 
             let (tx, rx) = mpsc::channel();
-            let tray_tx = tx.clone();
             app.manage(KeyTx(Mutex::new(tx.clone())));
-            let panel_item = MenuItem::with_id(app, "panel", "Show/Hide panel", true, None::<&str>)?;
-            let gem_item = MenuItem::with_id(app, "gempanel", "Show/Hide gem panel", true, None::<&str>)?;
-            let guide_panel_item = MenuItem::with_id(app, "guidepanel", "Show/Hide guide panel", true, None::<&str>)?;
-            let guide_item = MenuItem::with_id(app, "guide", "Open guide…", true, None::<&str>)?;
-            let gems_item = MenuItem::with_id(app, "gems", "Open gems…", true, None::<&str>)?;
-            let items_item = MenuItem::with_id(app, "items", "Open items…", true, None::<&str>)?;
-            let tree_item = MenuItem::with_id(app, "tree", "Open tree…", true, None::<&str>)?;
-            let build_item = MenuItem::with_id(app, "build", "Set up build…", true, None::<&str>)?;
+            let open_item = MenuItem::with_id(app, "open", "Open POE Tracker", true, None::<&str>)?;
             let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
-            let resync_item = MenuItem::with_id(app, "resync", "Re-sync character…", true, None::<&str>)?;
+            let separator = PredefinedMenuItem::separator(app)?;
             let quit = MenuItem::with_id(app, "quit", "Quit POE Tracker", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&panel_item, &gem_item, &guide_panel_item, &tree_item, &gems_item, &items_item, &guide_item, &build_item, &settings_item, &resync_item, &quit])?;
+            let menu = Menu::with_items(app, &[&open_item, &settings_item, &separator, &quit])?;
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .tooltip("POE Tracker")
                 .menu(&menu)
                 .on_menu_event(move |app, e| match e.id().as_ref() {
-                    "panel" => {
-                        let _ = tray_tx.send(Msg::TogglePanel);
-                    }
-                    "gempanel" => {
-                        let _ = tray_tx.send(Msg::ToggleGemPanel);
-                    }
-                    "guidepanel" => {
-                        let _ = tray_tx.send(Msg::ToggleGuidePanel);
-                    }
-                    "guide" => open_main(app, Some("guide")),
-                    "gems" => open_main(app, Some("gems")),
-                    "items" => open_main(app, Some("items")),
-                    "tree" => open_main(app, Some("tree")),
-                    "build" => open_main(app, Some("build")),
+                    "open" => open_main(app, None),
                     "settings" => open_main(app, Some("settings")),
-                    "resync" => resync(app),
                     "update" => app.restart(),
+                    "update_now" => {
+                        let h = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = install_update(h.clone()).await {
+                                let _ = h.emit("update_progress", e);
+                            }
+                        });
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
                 .build(app)?;
             // the panel no longer shows at launch, so a missing permission is told in the Main window
-            if first_run || permission().contains("NOT") {
+            if first_run || show_whats_new || permission().contains("NOT") {
                 open_main(app.handle(), None);
             }
 

@@ -36,11 +36,12 @@
 <div class="panel" id="panel"><p class="note">Loading…</p></div>
 <script src="keys.js"></script>
 <script src="guide-parts.js"></script>
+<script src="layout-parts.js"></script>
 <script>
   const { invoke } = window.__TAURI__.core
   const { listen } = window.__TAURI__.event
   const { esc, line, gems, exp } = GuideParts
-  document.querySelector('style').textContent += GuideParts.css
+  document.querySelector('style').textContent += GuideParts.css + LayoutParts.css
   const panel = document.getElementById('panel')
   let hotkey = KeyLabel.format({ code: 'KeyL', alt: true })
   let view = null
@@ -49,16 +50,16 @@
     const v = view
     if (!v) return
     const total = v.steps.length
-    const keys = `<span class="keys">${esc(hotkey)} or Esc hides · drag here to move</span>`
+    const keys = `<span class="keys">${esc(hotkey)} hides · drag here to move</span>`
     const nav = `<span class="nav"><button data-go="-1" aria-label="Previous step" ${v.step === 0 ? 'disabled' : ''}>‹</button><button data-go="1" aria-label="Next step" ${v.step >= total ? 'disabled' : ''}>›</button></span>`
     if (v.step >= total) {
-      panel.innerHTML = `<p class="note"><b>Campaign done.</b> The whole route is in the Guide section (Open guide… in the POE Tracker menu).</p>
+      panel.innerHTML = `<p class="note"><b>Campaign done.</b> The whole route is in the Guide section (Open POE Tracker from the menu bar / tray icon).</p>
         <footer><span>Acts 1–10 done</span>${keys}${nav}</footer>`
       return
     }
     const s = v.steps[v.step]
     const rows = s.lines.map((l, i) => `<li class="${i === s.lines.length - 1 && s.to ? 'last' : ''}">${line(l.parts)}${l.subs.map(x => `<div class="sub">${line(x)}</div>`).join('')}${gems(l.gems)}</li>`).join('')
-    panel.innerHTML = `<ol>${rows}</ol><footer><span>Act ${s.act} · step ${v.step + 1}/${total}</span>${keys}${exp(v)}${nav}</footer>`
+    panel.innerHTML = `<ol>${rows}</ol>${LayoutParts.section(v.layout)}<footer><span>Act ${s.act} · step ${v.step + 1}/${total}</span>${keys}${exp(v)}${nav}</footer>`
   }
 
   const load = () => invoke('guide_view').then(v => { view = v; render() })
@@ -71,6 +72,7 @@
   listen('binds', e => useBinds(e.payload))
 
   GuideParts.copyOnClick(panel)
+  LayoutParts.onClick(panel, invoke, render)
   panel.addEventListener('click', e => {
     const b = e.target.closest('button[data-go]')
     if (b && view) invoke('guide_jump', { step: Math.max(0, view.step + Number(b.dataset.go)) })

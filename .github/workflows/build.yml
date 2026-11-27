@@ -86,6 +86,8 @@ jobs:
   check-updater:
     needs: [release, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -95,3 +97,23 @@ jobs:
           for p in darwin-universal linux-x86_64 windows-x86_64; do
             jq -e --arg p "$p" '.platforms[$p]' latest.json > /dev/null || { echo "latest.json is missing $p: re-run the build for it"; exit 1; }
           done
+      # The test-build feed: a rolling `test-builds` prerelease whose latest.json names the newest
+      # build, test or full. Only an install with a `test-builds` flag file follows it (lib.rs,
+      # updater_for); everyone else follows releases/latest, which skips prereleases.
+      - name: point the test-build feed at this build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          R=$GITHUB_REPOSITORY
+          if ! gh release view test-builds -R "$R" > /dev/null 2>&1; then
+            gh release create test-builds -R "$R" --prerelease --latest=false --target "$GITHUB_SHA" \
+              --title "Test-build update feed" --notes "Not a build: holds the latest.json that test installs update from."
+          fi
+          new=$(jq -r .version latest.json)
+          old=$(gh release download test-builds -R "$R" -p latest.json -O - 2>/dev/null | jq -r '.version // "0"' || echo 0)
+          if [ "$(printf '%s\n%s\n' "$old" "$new" | sort -V | tail -n1)" = "$new" ]; then
+            gh release upload test-builds latest.json -R "$R" --clobber
+            echo "test-build feed now at $new"
+          else
+            echo "test-build feed stays at $old (newer than $new)"
+          fi

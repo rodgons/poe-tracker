@@ -1,10 +1,10 @@
 // The player's key binds (by default the panel hotkey Alt/Option+P, the Gem panel
 // hotkey Alt/Option+G, the Guide panel hotkey Alt/Option+L, the zoom keys
-// Alt/Option + = - 0, panning Alt/Option + arrows and Esc). A listen-only hook observes
+// Alt/Option + = - 0 and panning Alt/Option + arrows). A listen-only hook observes
 // them; while the game is in front the toggle (and, with the panel shown, zoom and pan)
 // are also registered as OS hot keys, so the game never sees them. The game ignores
 // modifiers, so without that ⌥P would also open its passive tree. Nothing is ever
-// simulated or sent to the game, and Esc always reaches it.
+// simulated or sent to the game. Each panel opens and closes only with its own hotkey.
 use rdev::{listen, EventType, Key};
 use serde::{Deserialize, Serialize};
 use std::sync::{
@@ -44,7 +44,6 @@ impl Bind {
 pub struct Binds {
     /// the Panel hotkey
     pub toggle: Bind,
-    pub hide: Bind,
     pub zoom_in: Bind,
     pub zoom_out: Bind,
     /// zoom back out to the whole spec
@@ -63,7 +62,6 @@ impl Default for Binds {
     fn default() -> Self {
         Binds {
             toggle: Bind::alt("KeyP"),
-            hide: Bind { alt: false, ..Bind::alt("Escape") },
             zoom_in: Bind::alt("Equal"),
             zoom_out: Bind::alt("Minus"),
             zoom_whole: Bind::alt("Digit0"),
@@ -78,10 +76,9 @@ impl Default for Binds {
 }
 
 impl Binds {
-    fn all(&self) -> [(&Bind, Msg); 11] {
+    fn all(&self) -> [(&Bind, Msg); 10] {
         [
             (&self.toggle, Msg::Hotkey),
-            (&self.hide, Msg::Esc),
             (&self.zoom_in, Msg::Zoom(1)),
             (&self.zoom_out, Msg::Zoom(-1)),
             (&self.zoom_whole, Msg::Zoom(0)),
@@ -115,9 +112,9 @@ static BINDS: LazyLock<RwLock<Binds>> = LazyLock::new(|| RwLock::new(Binds::defa
 /// leaves those alone so they don't fire twice.
 static GRABBED: AtomicU16 = AtomicU16::new(0);
 
-/// Bits of `Binds::all()`: the three panel toggles, then zoom and pan; hide (Esc) is never taken from the game.
-pub const TOGGLE: u16 = 1 | 1 << 9 | 1 << 10;
-pub const VIEW: u16 = 0b1_1111_1100;
+/// Bits of `Binds::all()`: the three panel toggles, then zoom and pan.
+pub const TOGGLE: u16 = 1 | 1 << 8 | 1 << 9;
+pub const VIEW: u16 = 0b1111_1110;
 
 /// Swaps the binds the hook listens for; takes effect on the next key press.
 pub fn set(binds: Binds) {
@@ -312,9 +309,9 @@ mod tests {
         b.guide_toggle = b.gem_toggle.clone();
         assert!(b.check().is_err(), "nor can the Guide and Gem panel hotkeys");
         b.guide_toggle = Binds::default().guide_toggle;
-        b.hide = b.toggle.clone();
+        b.zoom_in = b.toggle.clone();
         assert!(b.check().is_err());
-        b.hide.code.clear();
+        b.zoom_in.code.clear();
         assert!(b.check().is_err());
     }
 }
