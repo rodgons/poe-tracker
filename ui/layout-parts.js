@@ -144,9 +144,9 @@ window.LayoutParts = (() => {
 
   const css = `
     .l-row { border-top: 1px solid var(--rule); margin-top: 2px; padding-top: 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .l-hint { font-size: 11px; color: var(--dim); }
+    .l-hint { font-size: 12.5px; color: var(--dim); }
     .l-pick { border-top: 1px solid var(--rule); margin-top: 2px; padding-top: 4px; display: flex; flex-direction: column; gap: 5px; }
-    .l-key { margin-left: 6px; display: inline-flex; gap: 8px; font-size: 10.5px; color: var(--plan); }
+    .l-key { margin-left: 6px; display: inline-flex; gap: 8px; font-size: 12px; color: var(--plan); }
     .l-key i { font-style: normal; }
     .l-here { color: var(--ok); } .l-green { color: #6fe04f; } .l-white { color: var(--faint); }
     .l-thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -159,14 +159,14 @@ window.LayoutParts = (() => {
     .l-thumb .l-clue { stroke: #6fe04f; stroke-width: 2.6; }
     .l-thumb:hover .l-wall { stroke: var(--plan); }
     .l-m-here { fill: var(--ok); stroke: #11100c; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-    .l-legs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 11.5px; min-width: 0; flex: 1 1 260px; }
+    .l-legs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 13px; min-width: 0; flex: 1 1 260px; }
     .l-sep { color: var(--plan); }
     .l-fill { flex: 0 0 0; }
     .l-start { color: var(--ok); font-style: normal; } .l-wp { color: var(--ink); font-style: normal; } .l-obj { color: var(--next); font-style: normal; }
-    .l-link { all: unset; cursor: pointer; font-size: 10.5px; color: var(--plan); text-decoration: underline dotted; text-underline-offset: 3px; }
+    .l-link { all: unset; cursor: pointer; font-size: 12px; color: var(--plan); text-decoration: underline dotted; text-underline-offset: 3px; }
     .l-link:hover { color: var(--alloc); }
     .l-big { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
-    .l-legend { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 10.5px; color: var(--dim); }
+    .l-legend { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; color: var(--dim); }
     .l-legend i { font-style: normal; }
     .l-svg { display: block; background: #110f0c; }
     .l-svg polyline { fill: none; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }

@@ -2,12 +2,14 @@
 // Each fragment kind has an icon or a type style as well as a colour, never colour alone.
 window.GuideParts = (() => {
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
-  const icons = { kill: '⚔ ', quest: '◆ ', waypoint: '⇲ ', waypoint_get: '+⇲ ', logout: '⏏ ', portal: '◌ ', trial: '⛬ ', ascend: '⛬ ', crafting: '⚒ ' }
+  // drawn icons (icons.js), not font glyphs, which some system fonts lack
+  const kinds = { kill: 'kill', quest: 'quest', waypoint: 'waypoint', waypoint_get: 'waypoint', logout: 'logout', portal: 'portal', trial: 'trial', ascend: 'trial', crafting: 'crafting' }
+  const icon = kind => kinds[kind] && window.Icons ? `${Icons.icon(kinds[kind])}${kind === 'waypoint_get' ? '<b class="g-new">+</b>' : ''} ` : ''
   function part(p) {
     if (p.kind === 'text') return esc(p.text)
     // a compass direction in degrees, as exile-leveling writes it: 0 is up (north), 90 right
     if (p.kind === 'dir') return `<span class="g-dir" style="transform:rotate(${Number(p.text) - 90}deg)" role="img" aria-label="${esc(p.text)}°">➜</span>`
-    return `<span class="g-${esc(p.kind)}">${icons[p.kind] ?? ''}${esc(p.text)}</span>`
+    return `<span class="g-${esc(p.kind)}">${icon(p.kind)}${esc(p.text)}</span>`
   }
   const line = parts => parts.map(part).join('')
   // the Build's gems at a quest hand-in: ★ take as the reward, $ buy from the NPC.
@@ -31,18 +33,19 @@ window.GuideParts = (() => {
     .g-waypoint, .g-waypoint_get, .g-logout, .g-portal, .g-trial, .g-ascend, .g-crafting, .g-area { font-weight: 600; }
     .g-quest_text, .g-generic, .g-arena { color: var(--item); font-style: italic; }
     .g-dir { display: inline-block; color: var(--alloc); }
-    .g-gems { padding-left: 16px; display: flex; flex-wrap: wrap; gap: 1px 12px; font-size: 11.5px; }
+    .g-new { font-weight: 700; margin-left: -1px; }
+    .g-gems { padding-left: 18px; margin-top: 2px; display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: .92em; }
     .g-gem i { font-style: normal; display: inline-block; width: 14px; text-align: center; font-weight: 700; }
     .g-gem.take, .g-gem.take i { color: var(--alloc); }
     .g-gem.buy i { color: var(--next); }
     .g-gem small { color: var(--plan); }
-    .g-gem.have { opacity: .5; }
+    .g-gem.have { opacity: .6; }
     .g-gem b { color: var(--ok); }
     .gcopy { cursor: copy; border-radius: 3px; }
     .gcopy:hover { color: var(--alloc); text-decoration: underline dotted; text-underline-offset: 3px; }
     .gcopy:focus-visible { outline: 2px solid var(--alloc); outline-offset: 1px; }
-    .g-copied { margin-left: 6px; font: 600 10.5px var(--body); color: var(--alloc); }
-    .g-exp { font: 600 11px var(--mono); white-space: nowrap; color: var(--ok); }
+    .g-copied { margin-left: 6px; font: 600 12px var(--body); color: var(--alloc); }
+    .g-exp { font: 600 12.5px var(--body); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ok); }
     .g-exp.off { color: var(--refund); }`
   // click (or Enter on) a gem name: copy it through the app, which can write the
   // clipboard when the page has no focus, and say so beside the name for a moment

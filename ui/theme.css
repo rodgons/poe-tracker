@@ -1,0 +1,75 @@
+/* The app's shared look: Path of Exile's palette and the bundled type, for the Main window and the
+   in-game panels. Each page adds its own rules (and a panel its own --panel and --edge) after this.
+
+   The hues are the game's own; the tones are set for reading: secondary text clears 4.5:1 on the
+   darkest surfaces, and control borders clear 3:1 so fields and buttons read as fields and buttons. */
+
+/* Cinzel (headings) and Source Sans 3 (everything else), SIL Open Font License 1.1, variable:
+   one file per subset serves every weight. Bundled, so the app looks the same offline. */
+@font-face {
+  font-family: "Cinzel"; font-style: normal; font-weight: 400 900; font-display: swap;
+  src: url("fonts/cinzel-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Cinzel"; font-style: normal; font-weight: 400 900; font-display: swap;
+  src: url("fonts/cinzel-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Source Sans 3"; font-style: normal; font-weight: 200 900; font-display: swap;
+  src: url("fonts/source-sans-3-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Source Sans 3"; font-style: normal; font-weight: 200 900; font-display: swap;
+  src: url("fonts/source-sans-3-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Source Sans 3"; font-style: italic; font-weight: 200 900; font-display: swap;
+  src: url("fonts/source-sans-3-italic-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Source Sans 3"; font-style: italic; font-weight: 200 900; font-display: swap;
+  src: url("fonts/source-sans-3-italic-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  color-scheme: dark;
+  /* Path of Exile's palette: near-black panels, bronze frame, gold for taken points,
+     Magic-item blue for what's next, red for refunds */
+  --scene: #0b0a08; --scene2: #1c1914; --card: #15130f;
+  --ink: #e6dcc8;      /* body text, 14:1 */
+  --dim: #bcb197;      /* secondary text, 9:1 */
+  --plan: #a29785;     /* tertiary text and later points, 6:1 */
+  --faint: #554a3b;    /* tracks and quiet rules: never text */
+  --line: #73644d;     /* control borders: fields, ghost buttons at rest, 3.2:1 */
+  --edge: #463c2f;     /* card borders */
+  --rule: #463c2f;
+  --other: #2a251e;    /* the tree's unchosen points */
+  --alloc: #d9b45a; --next: #8888ff; --refund: #e8574b; --kill: #e09a4f; --unlinked: #e09a4f;
+  --item: #c9b98f; --ok: #7fbf6a;
+  /* tints for state surfaces, from the same hues */
+  --alloc-bg: rgba(217, 180, 90, .11); --next-bg: rgba(136, 136, 255, .13); --refund-bg: rgba(232, 87, 75, .13); --unlinked-bg: rgba(224, 154, 79, .13);
+  /* the game's item text: normal, rare, unique (lifted to read on the dark cards), mods, crafted, fractured */
+  --inormal: #c8c8c8; --irare: #ffff77; --iunique: #cf7a3c; --imod: #8888ff; --icraft: #b4b4ff; --ifrac: #b3a170;
+  --display: "Cinzel", "Trajan Pro", Georgia, serif;
+  --body: "Source Sans 3", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, Menlo, Consolas, monospace;
+}
+
+/* browser surfaces in the palette */
+::selection { background: rgba(217, 180, 90, .35); color: var(--ink); }
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--faint); border: 2px solid transparent; border-radius: 6px; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: var(--line); }
+/* counts and levels line up as they tick */
+.num { font-variant-numeric: tabular-nums; }
+
+/* drawn icons (icons.js): one 1.6px stroke, sized to the text around them */
+svg.ic { width: 1em; height: 1em; flex: none; vertical-align: -.14em; overflow: visible; }

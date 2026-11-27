@@ -151,7 +151,8 @@ const MiniTree = (() => {
       discs.push(p.b)
     }
     // a name's spots around a disc (a badge, or the node itself): above, below, right, left
-    const fs = 10 * u
+    // names at 11px with a dark halo, so they read over paths and the game behind a panel
+    const fs = 11 * u
     function place(name, d, gap) {
       const tw = name.length * fs * .58
       const spots = [

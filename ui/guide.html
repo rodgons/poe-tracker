@@ -3,38 +3,36 @@
 <head>
 <meta charset="utf-8">
 <title>POE Tracker · Guide panel</title>
+<link rel="stylesheet" href="theme.css">
 <style>
   /* Guide panel: the Leveling guide's current Guide step, in a strip above the skill bar.
      Every line of the step, hints under their line, the area to enter next set apart at the end. */
-  :root {
-    --ink: #e0d6c3; --dim: #aa9e82; --faint: #4a4135;
-    --alloc: #d9b45a; --next: #8888ff; --plan: #8a8072; --kill: #e09a4f; --item: #c9b98f; --ok: #7fbf6a; --refund: #e04a3f;
-    --panel: rgba(11, 10, 8, .92); --edge: #6e5a3a; --rule: #3b3328;
-    --body: -apple-system, "Segoe UI", system-ui, sans-serif;
-    --mono: ui-monospace, Menlo, Consolas, monospace;
-  }
+  /* tokens and type: theme.css. A panel sits over the game, so its backing is near-solid and it
+     keeps the brighter bronze frame; no dark canvas behind the transparent window. */
+  :root { color-scheme: normal; --panel: rgba(11, 10, 8, .95); --edge: #6e5a3a; }
   html, body { margin: 0; background: transparent; color: var(--ink); font-family: var(--body); }
   .panel { margin: 8px; padding: 8px 12px 6px; border-radius: 6px; background: var(--panel); border: 1px solid var(--edge);
-    font-size: 12.5px; line-height: 1.45; display: flex; flex-direction: column; gap: 4px; }
+    font-size: 15px; line-height: 1.45; display: flex; flex-direction: column; gap: 5px; box-shadow: 0 2px 8px rgba(0, 0, 0, .55); }
   ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
   li.last { border-top: 1px solid var(--rule); margin-top: 2px; padding-top: 3px; }
-  .sub { padding-left: 16px; font-size: 11px; color: var(--dim); }
+  .sub { padding-left: 18px; font-size: 13.5px; color: var(--dim); }
   .note { margin: 0; color: var(--dim); }
   .note b { color: var(--alloc); font-weight: 600; }
-  footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; font: 500 10.5px var(--mono); color: var(--plan);
+  footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; font: 600 13px var(--body); font-variant-numeric: tabular-nums; color: var(--dim);
     cursor: move; user-select: none; -webkit-user-select: none; }
   footer .keys { display: none; font-family: var(--body); }
   .panel:hover footer .keys { display: inline; }
   .nav { display: flex; gap: 4px; }
-  button { font: 600 12px var(--body); color: var(--ink); background: #1a1712; border: 1px solid var(--rule); border-radius: 4px;
-    padding: 0 7px; line-height: 18px; cursor: pointer; }
-  button:hover { border-color: var(--edge); }
+  button { font: 700 15px var(--body); color: var(--ink); background: var(--scene2); border: 1px solid var(--line); border-radius: 6px;
+    padding: 0 9px; line-height: 22px; cursor: pointer; }
+  button:hover { border-color: var(--alloc); color: var(--alloc); }
   button:disabled { opacity: .35; cursor: default; }
 </style>
 </head>
 <body>
 <div class="panel" id="panel"><p class="note">Loading…</p></div>
 <script src="keys.js"></script>
+<script src="icons.js"></script>
 <script src="guide-parts.js"></script>
 <script src="layout-parts.js"></script>
 <script>
