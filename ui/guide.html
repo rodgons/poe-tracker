@@ -53,7 +53,7 @@
     const keys = `<span class="keys">${esc(hotkey)} hides · drag here to move</span>`
     const nav = `<span class="nav"><button data-go="-1" aria-label="Previous step" ${v.step === 0 ? 'disabled' : ''}>‹</button><button data-go="1" aria-label="Next step" ${v.step >= total ? 'disabled' : ''}>›</button></span>`
     if (v.step >= total) {
-      panel.innerHTML = `<p class="note"><b>Campaign done.</b> The whole route is in the Guide section (Open guide… in the POE Tracker menu).</p>
+      panel.innerHTML = `<p class="note"><b>Campaign done.</b> The whole route is in the Guide section (Open POE Tracker from the menu bar / tray icon).</p>
         <footer><span>Acts 1–10 done</span>${keys}${nav}</footer>`
       return
     }

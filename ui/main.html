@@ -336,7 +336,7 @@
     <div class="form" id="loEdit" hidden><div>
       <div class="lo-top"><button class="ghost" id="loBack">‹ Loadouts</button><h1 id="loTitle" style="flex:1">New loadout</h1></div>
       <fieldset>
-        <label for="loName">Name <small>(how this loadout shows in the list, the sidebar and the tray)</small></label>
+        <label for="loName">Name <small>(how this loadout shows in the list and the sidebar)</small></label>
         <input id="loName" spellcheck="false" autocomplete="off" placeholder="e.g. RF Juggernaut">
       </fieldset>
       <fieldset>
@@ -425,7 +425,7 @@
     if (name === 'guide') loadGuide(true)
   }
   document.querySelectorAll('nav button.go').forEach(b => b.onclick = () => show(b.dataset.go))
-  // the tray opens a given section; without one, Build until a build is saved, then the last used
+  // the tray's Settings… opens that section; without one, Build until a build is saved, then the last used
   listen('section', e => show(e.payload))
 
   // ---- banners ----

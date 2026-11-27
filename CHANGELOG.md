@@ -3,6 +3,11 @@
 What changed in each version, as the app shows it once after updating. Newest first; each
 version is a `## x.y.z` heading followed by `- ` bullets written for players.
 
+## 0.11.3
+
+- The tray menu is shorter: **Open POE Tracker**, **Settings…** and **Quit POE Tracker**. The sections, Loadouts and Re-sync are in the main window's sidebar.
+- The in-game panels now open and close only with their hotkeys, not from the tray.
+
 ## 0.11.2
 
 - The app now checks for updates while it's open, not only at launch. When a new version is out, a button in the sidebar (and an item in the tray menu) offers to update right away.
