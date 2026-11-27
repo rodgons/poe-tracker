@@ -3,6 +3,17 @@
 What changed in each version, as the app shows it once after updating. Newest first; each
 version is a `## x.y.z` heading followed by `- ` bullets written for players.
 
+## 0.12.0
+
+- Easier to read everywhere: stronger contrast, clearer headings, and the current, next and refund points stand out from each other, in the Main window and the in-game panels.
+- A sharper text font, bundled with the app, and drawn icons for gem marks and Guide steps, so they look the same on every system.
+- The in-game panels are slightly more solid over the game.
+- Fixed: re-syncing, or a refund being checked, while the app switched loadouts could put one character's points into another loadout.
+- Fixed: the Gems section could stay on "Importing…".
+- Fixed: Trade links could stay on Standard until restart when the league lookup failed.
+- Fixed: a panel hotkey pressed right after switching to the game could be ignored.
+- Smoother while playing: points ticking, zooming and dragging the Corner panel do less work, and the app saves less often.
+
 ## 0.11.3
 
 - The tray menu is shorter: **Open POE Tracker**, **Settings…** and **Quit POE Tracker**. The sections, Loadouts and Re-sync are in the main window's sidebar.
