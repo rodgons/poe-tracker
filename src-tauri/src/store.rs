@@ -56,6 +56,8 @@ pub struct Saved {
     /// each Character's own state, by lowercased name, as it was when its Loadout was last left;
     /// shared by all of that Character's Loadouts
     pub characters: HashMap<String, CharacterState>,
+    /// the app version whose changes the player last saw (the What's new pop-up), empty before
+    pub seen_version: String,
 }
 
 /// A named pairing of a Character and a Build; one Character may have several.
@@ -119,6 +121,7 @@ impl Default for Saved {
             loadouts: Vec::new(),
             active: 0,
             characters: HashMap::new(),
+            seen_version: String::new(),
         }
     }
 }

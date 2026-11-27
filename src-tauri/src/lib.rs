@@ -14,6 +14,7 @@ use tauri::{
     AppHandle, Emitter, LogicalPosition, Manager, PhysicalPosition, State, WebviewWindow,
 };
 
+mod changelog;
 mod clientlog;
 mod foreground;
 mod gamewin;
@@ -52,6 +53,10 @@ struct App {
     refund_unchecked: bool,
     /// a downloaded update's version, waiting for a restart
     update_ready: Option<String>,
+    /// a newer version found while the app runs, not downloaded until the player asks
+    update_offer: Option<tauri_plugin_updater::Update>,
+    /// what's new since the version the player last ran, until they close the pop-up
+    whats_new: Vec<changelog::Entry>,
     /// the Character's socketed gems from the last items import
     gems: Gems,
     /// the area the player is in and its level, from the log
@@ -1042,11 +1047,45 @@ struct AppInfo {
     version: String,
     /// a downloaded update, waiting for a restart
     update: Option<String>,
+    /// a newer version the player can update to now
+    available: Option<String>,
 }
 
 #[tauri::command]
 fn app_info(app: AppHandle, state: State<'_, AppState>) -> AppInfo {
-    AppInfo { version: app.package_info().version.to_string(), update: state.lock().unwrap().update_ready.clone() }
+    let st = state.lock().unwrap();
+    AppInfo {
+        version: app.package_info().version.to_string(),
+        update: st.update_ready.clone(),
+        available: st.update_offer.as_ref().map(|u| u.version.clone()),
+    }
+}
+
+/// What's new since the version the player last ran; empty once they've closed it.
+#[tauri::command]
+fn whats_new(state: State<'_, AppState>) -> Vec<changelog::Entry> {
+    let st = state.lock().unwrap();
+    st.whats_new.iter().map(|e| changelog::Entry { version: e.version.clone(), changes: e.changes.clone() }).collect()
+}
+
+/// The player closed the What's new pop-up: it won't show again until the next version.
+#[tauri::command]
+fn whats_new_seen(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut st = state.lock().unwrap();
+    st.whats_new.clear();
+    st.saved.seen_version = app.package_info().version.to_string();
+    store::save(&st.path, &st.saved)
+}
+
+/// The player asked to update now: download and install the offered version, then restart
+/// into it. (On Windows the installer closes the app itself.)
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    let update = app.state::<AppState>().lock().unwrap().update_offer.clone().ok_or("No update to install.")?;
+    let _ = app.emit("update_progress", format!("Downloading v{}…", update.version));
+    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| format!("The update failed: {e}"))?;
+    let _ = app.emit("update_progress", "Restarting…");
+    app.restart();
 }
 
 #[tauri::command]
@@ -1555,23 +1594,66 @@ fn updater_for(app: &AppHandle) -> tauri_plugin_updater::Result<tauri_plugin_upd
     app.updater_builder().endpoints(vec![feed])?.build()
 }
 
-/// Auto-update, once at launch: if GitHub has a newer release, download and install it, then
-/// restart into it straight away unless the Corner panel is showing. Then the tray menu offers
-/// the restart instead, so an update never takes the panel away mid-game. (On Windows the
-/// installer closes the app itself.) Any failure just leaves the current version running.
+/// How often the running app looks for a newer version.
+const UPDATE_EVERY: Duration = Duration::from_secs(30 * 60);
+
+/// Auto-update. At launch: if GitHub has a newer release, download and install it, then restart
+/// into it straight away unless a panel is showing; then the sidebar and the tray offer the
+/// restart instead, so an update never takes a panel away mid-game. (On Windows the installer
+/// closes the app itself.) After that, every half hour: a newer version is only offered (sidebar
+/// button, tray item), and downloaded when the player asks. Any failure leaves this version running.
 async fn update(app: AppHandle, menu: Menu<tauri::Wry>) {
     let updater = match updater_for(&app) {
         Ok(updater) => updater,
         Err(e) => return eprintln!("updater unavailable: {e}"),
     };
-    let update = match updater.check().await {
-        Ok(Some(update)) => update,
-        Ok(None) => return,
-        Err(e) => return eprintln!("update check failed: {e}"),
-    };
-    if let Err(e) = update.download_and_install(|_, _| {}, || {}).await {
-        return eprintln!("update to {} failed: {e}", update.version);
+    match updater.check().await {
+        Ok(Some(update)) => match update.download_and_install(|_, _| {}, || {}).await {
+            Ok(()) => return downloaded(&app, &menu, &update.version),
+            Err(e) => eprintln!("update to {} failed: {e}", update.version),
+        },
+        Ok(None) => {}
+        Err(e) => eprintln!("update check failed: {e}"),
     }
+    let mut item: Option<MenuItem<tauri::Wry>> = None;
+    loop {
+        let _ = tauri::async_runtime::spawn_blocking(|| std::thread::sleep(UPDATE_EVERY)).await;
+        let update = match updater.check().await {
+            Ok(Some(update)) => update,
+            Ok(None) => continue,
+            Err(e) => {
+                eprintln!("update check failed: {e}");
+                continue;
+            }
+        };
+        let version = update.version.clone();
+        {
+            let st = app.state::<AppState>();
+            let mut st = st.lock().unwrap();
+            if st.update_offer.as_ref().is_some_and(|u| u.version == version) {
+                continue;
+            }
+            st.update_offer = Some(update);
+        }
+        let _ = app.emit("update_available", &version);
+        let label = format!("Update to v{version} now");
+        match &item {
+            Some(i) => {
+                let _ = i.set_text(label);
+            }
+            None => match MenuItem::with_id(&app, "update_now", label, true, None::<&str>) {
+                Ok(i) => {
+                    let _ = menu.insert(&i, 0);
+                    item = Some(i);
+                }
+                Err(e) => eprintln!("update menu item: {e}"),
+            },
+        }
+    }
+}
+
+/// An update installed at launch: restart into it now, or offer the restart while a panel shows.
+fn downloaded(app: &AppHandle, menu: &Menu<tauri::Wry>, version: &str) {
     let panel_shown = ["corner", GEM_PANEL, GUIDE_PANEL]
         .iter()
         .any(|l| app.get_webview_window(l).and_then(|w| w.is_visible().ok()).unwrap_or(false));
@@ -1579,11 +1661,11 @@ async fn update(app: AppHandle, menu: Menu<tauri::Wry>) {
         app.restart();
     }
     if let Some(st) = app.try_state::<AppState>() {
-        st.lock().unwrap().update_ready = Some(update.version.clone());
+        st.lock().unwrap().update_ready = Some(version.to_string());
     }
-    let _ = app.emit_to("main", "update_ready", &update.version);
-    let label = format!("Restart to update to v{}", update.version);
-    match MenuItem::with_id(&app, "update", label, true, None::<&str>) {
+    let _ = app.emit_to("main", "update_ready", version);
+    let label = format!("Restart to update to v{version}");
+    match MenuItem::with_id(app, "update", label, true, None::<&str>) {
         Ok(item) => {
             let _ = menu.insert(&item, 0);
         }
@@ -1674,6 +1756,9 @@ pub fn run() {
             copy_text,
             app_info,
             restart_to_update,
+            whats_new,
+            whats_new_seen,
+            install_update,
             open_input_monitoring
         ])
         .setup(|app| {
@@ -1682,7 +1767,19 @@ pub fn run() {
             saved.ensure_loadout();
             keys::set(saved.binds.clone());
             let first_run = saved.build.is_none();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, gems: Gems::default(), area: None, seed: 0, picks: layouts::Picks::default(), season_league: None, season_tried: false }));
+            // what's new since the last version run here; a fresh install starts with nothing to show
+            let current = app.package_info().version.to_string();
+            let whats_new = if first_run && saved.seen_version.is_empty() {
+                saved.seen_version = current.clone();
+                let _ = store::save(&path, &saved);
+                Vec::new()
+            } else if saved.seen_version != current {
+                changelog::since(changelog::bundled(), &saved.seen_version, &current)
+            } else {
+                Vec::new()
+            };
+            let show_whats_new = !whats_new.is_empty();
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, update_offer: None, whats_new, gems: Gems::default(), area: None, seed: 0, picks: layouts::Picks::default(), season_league: None, season_tried: false }));
             upgrade_build(app.handle().clone());
 
             #[cfg(target_os = "macos")]
@@ -1767,6 +1864,14 @@ pub fn run() {
                     "settings" => open_main(app, Some("settings")),
                     "resync" => resync(app),
                     "update" => app.restart(),
+                    "update_now" => {
+                        let h = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = install_update(h.clone()).await {
+                                let _ = h.emit("update_progress", e);
+                            }
+                        });
+                    }
                     "quit" => app.exit(0),
                     id => {
                         if let Some(i) = id.strip_prefix("loadout:").and_then(|i| i.parse().ok()) {
@@ -1776,7 +1881,7 @@ pub fn run() {
                 })
                 .build(app)?;
             // the panel no longer shows at launch, so a missing permission is told in the Main window
-            if first_run || permission().contains("NOT") {
+            if first_run || show_whats_new || permission().contains("NOT") {
                 open_main(app.handle(), None);
             }
 

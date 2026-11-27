@@ -44,6 +44,28 @@
   nav .sync[hidden] { display: none; }
   nav .sync span { font: 400 11px var(--body); color: var(--dim); min-height: 1.4em; }
   nav .sync span.bad { color: var(--refund); }
+  /* a newer version: offered in the sidebar on every section */
+  nav .upd { display: flex; flex-direction: column; gap: 4px; padding: 8px 9px; border-radius: 6px;
+    background: rgba(111, 224, 79, .08); border: 1px solid rgba(111, 224, 79, .45); }
+  nav .upd[hidden] { display: none; }
+  nav .upd small { font: 600 9.5px var(--body); letter-spacing: .08em; text-transform: uppercase; color: #6fe04f; }
+  nav .upd span { font: 400 11.5px var(--body); color: var(--ink); }
+  nav .upd .upd-err { color: var(--refund); font-size: 11px; }
+  nav .upd .upd-err:empty { display: none; }
+  /* What's new: once after each update */
+  dialog#whatsNew { max-width: 520px; width: calc(100% - 32px); max-height: 80vh; padding: 0; border: 1px solid var(--edge);
+    border-radius: 10px; background: var(--card); color: var(--ink); }
+  dialog#whatsNew::backdrop { background: rgba(0, 0, 0, .6); }
+  .wn-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 8px; }
+  .wn-hd h2 { margin: 0; font: 600 16px var(--display); letter-spacing: .05em; color: var(--alloc); }
+  .wn-x { background: none; color: var(--dim); font-size: 20px; line-height: 1; padding: 2px 8px; }
+  .wn-x:hover { color: var(--ink); }
+  .wn-body { padding: 0 18px 4px; overflow-y: auto; max-height: calc(80vh - 120px); }
+  .wn-body h3 { margin: 12px 0 4px; font: 600 12px var(--mono); color: var(--dim); }
+  .wn-body ul { margin: 0; padding-left: 18px; }
+  .wn-body li { display: list-item; list-style: disc; cursor: default; padding: 0; margin: 4px 0; line-height: 1.45; font-size: 13px; }
+  .wn-ft { display: flex; justify-content: flex-end; padding: 12px 18px 16px; }
+
   /* the loadout being followed, on every section */
   nav .cur-lo { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left;
     background: var(--scene2); color: var(--ink); border: 1px solid var(--edge); border-left: 3px solid var(--alloc); padding: 7px 9px; }
@@ -284,7 +306,13 @@
       <button class="ghost" id="resync" title="Import the Character's taken points from pathofexile.com again">Re-sync character</button>
       <span id="synced" role="status"></span>
     </div>
-    <span id="version"></span><button id="update" hidden></button></footer>
+    <div class="upd" id="updBox" hidden>
+      <small id="updHead">New version</small>
+      <span id="updText"></span>
+      <button id="update"></button>
+      <span class="upd-err" id="updErr"></span>
+    </div>
+    <span id="version"></span></footer>
 </nav>
 
 <div id="content">
@@ -359,6 +387,11 @@
   </section>
 </div>
 <div id="tip"></div>
+<dialog id="whatsNew" aria-labelledby="wnTitle">
+  <div class="wn-hd"><h2 id="wnTitle">What's new</h2><button class="wn-x" id="wnX" aria-label="Close">×</button></div>
+  <div class="wn-body" id="wnBody"></div>
+  <div class="wn-ft"><button id="wnOk">Got it</button></div>
+</dialog>
 
 <script src="minitree.js"></script>
 <script src="keys.js"></script>
@@ -1058,14 +1091,55 @@
 
   // ---- version and updates ----
   let version = ''
+  // downloaded at launch while a panel showed: only a restart is left
+  let updateKind = null   // 'ready' | 'available'
   function showUpdate(next) {
     if (!next) return
-    $('version').textContent = `v${version} → v${next} ready`
+    updateKind = 'ready'
+    $('updHead').textContent = 'Update ready'
+    $('updText').textContent = `v${version} → v${next}`
     $('update').textContent = 'Restart to update'
-    $('update').hidden = false
+    $('update').disabled = false
+    $('updBox').hidden = false
   }
-  $('update').onclick = () => invoke('restart_to_update')
+  // found while the app runs: downloaded only when the player asks
+  function showAvailable(next) {
+    if (!next || updateKind === 'ready') return
+    updateKind = 'available'
+    $('updHead').textContent = 'New version'
+    $('updText').textContent = `v${next} is out (you have v${version})`
+    $('update').textContent = 'Update now'
+    $('update').disabled = false
+    $('updErr').textContent = ''
+    $('updBox').hidden = false
+  }
+  $('update').onclick = async () => {
+    if (updateKind === 'ready') return invoke('restart_to_update')
+    $('update').disabled = true; $('update').textContent = 'Downloading…'; $('updErr').textContent = ''
+    try { await invoke('install_update') } catch (e) {
+      $('updErr').textContent = String(e)
+      $('update').disabled = false; $('update').textContent = 'Try again'
+    }
+  }
   listen('update_ready', e => showUpdate(e.payload))
+  listen('update_available', e => showAvailable(e.payload))
+  listen('update_progress', e => {
+    const t = String(e.payload)
+    if (t.startsWith('The update failed')) { $('updErr').textContent = t; $('update').disabled = false; $('update').textContent = 'Try again' }
+    else { $('update').disabled = true; $('update').textContent = t }
+  })
+
+  // What's new: the changes since the version last run here, once per update
+  async function whatsNew() {
+    const entries = await invoke('whats_new')
+    if (!entries.length) return
+    $('wnTitle').textContent = `What's new in v${entries[0].version}`
+    $('wnBody').innerHTML = entries.map(e =>
+      `${entries.length > 1 ? `<h3>v${esc(e.version)}</h3>` : ''}<ul>${e.changes.map(c => `<li>${esc(c)}</li>`).join('')}</ul>`).join('')
+    $('whatsNew').showModal()
+  }
+  $('wnX').onclick = $('wnOk').onclick = () => $('whatsNew').close()
+  $('whatsNew').addEventListener('close', () => invoke('whats_new_seen'))
 
   // ---- load ----
   const loadTree = () => invoke('build_view').then(d => { data = d; renderTree(); banners() })
@@ -1077,7 +1151,7 @@
   Promise.all([
     invoke('key_binds').then(b => { binds = b; showBinds() }),
     invoke('initial_status').then(s => { permission = s.permission }),
-    invoke('app_info').then(i => { version = i.version; $('version').textContent = `v${version}`; showUpdate(i.update) }),
+    invoke('app_info').then(i => { version = i.version; $('version').textContent = `v${version}`; showUpdate(i.update); showAvailable(i.available) }),
     loadTree(),
     loadSetup(true),
     invoke('loadouts').then(showLoadouts),
@@ -1085,6 +1159,7 @@
     banners()
     if (!current) show(hasBuild ? (recall('section') || 'tree') : 'build')
     if (!hasBuild && loadoutList.length <= 1) openEditor('edit', Math.max(0, activeLoadout()))
+    whatsNew()
   })
 </script>
 </body>
