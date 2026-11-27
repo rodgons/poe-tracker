@@ -5,7 +5,10 @@ use serde::Serialize;
 use std::{
     collections::HashSet,
     path::PathBuf,
-    sync::{mpsc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Mutex,
+    },
     time::Duration,
 };
 use tauri::{
@@ -51,6 +54,16 @@ struct App {
     refunding: Vec<u32>,
     /// that import failed (or there's no account): wait for a Re-sync instead
     refund_unchecked: bool,
+    /// the `epoch` a refund-settling import is running for, so area changes don't stack them
+    refund_job: Option<u64>,
+    /// bumps whenever the active Loadout, its Character or its Tree spec changes, so an import
+    /// that started before lands nowhere instead of on the wrong Loadout
+    epoch: u64,
+    /// the `epoch` the Build section's editor opened at: a Save after the game log switched
+    /// Loadouts under it would write the draft onto the other one
+    editor_epoch: Option<u64>,
+    /// numbers each gems import, so only the latest one clears `gems.busy`
+    gems_job: u64,
     /// a downloaded update's version, waiting for a restart
     update_ready: Option<String>,
     /// a newer version found while the app runs, not downloaded until the player asks
@@ -66,6 +79,7 @@ struct App {
     picks: layouts::Picks,
     /// this season's softcore league, for Trade links before a Character's league is known
     season_league: Option<String>,
+    /// that league is being learned or known; a failed lookup clears it to try again
     season_tried: bool,
 }
 
@@ -188,22 +202,29 @@ fn import_gems(handle: &AppHandle, asked: bool) {
         if !ready || st.gems.busy || (recent && !asked) {
             None
         } else {
-            let job = (s.account.clone(), s.character.clone());
+            let (account, character) = (s.account.clone(), s.character.clone());
             st.gems.busy = true;
             st.gems.tried = Some(std::time::Instant::now());
-            Some(job)
+            st.gems_job += 1;
+            Some((account, character, st.gems_job))
         }
     };
-    let Some((account, character)) = job else { return };
+    let Some((account, character, job)) = job else { return };
     let _ = handle.emit("gems", ());
     let app = handle.clone();
     std::thread::spawn(move || {
         let got = poeapi::items(&account, &character);
         let st = app.state::<AppState>();
         let mut st = st.lock().unwrap();
-        st.gems.busy = false;
-        // the Character changed while importing: this answer is someone else's
-        if st.saved.character != character || st.saved.account != account {
+        // the Character changed while importing: this answer is someone else's. A newer
+        // import (after a Loadout switch) owns `busy`; the windows still hear it ended.
+        let latest = st.gems_job == job;
+        if latest {
+            st.gems.busy = false;
+        }
+        if !latest || st.saved.character != character || st.saved.account != account {
+            drop(st);
+            let _ = app.emit("gems", ());
             return;
         }
         match got {
@@ -289,7 +310,9 @@ fn gems_view_of(app: &App) -> Option<GemsView> {
     })
 }
 
-#[tauri::command]
+// The view commands run `async`: off the main thread, which drives every window, since
+// building a view takes a few milliseconds under the state lock.
+#[tauri::command(async)]
 fn gems_view(state: State<'_, AppState>) -> Option<GemsView> {
     gems_view_of(&state.lock().unwrap())
 }
@@ -349,7 +372,7 @@ fn items_view_of(app: &App) -> Option<ItemsView> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn items_view(state: State<'_, AppState>) -> Option<ItemsView> {
     items_view_of(&state.lock().unwrap())
 }
@@ -364,8 +387,16 @@ fn refresh_items(app: AppHandle, state: State<'_, AppState>) {
     st.season_tried = true;
     drop(st);
     std::thread::spawn(move || {
-        let Some(league) = poeapi::season_league() else { return };
-        app.state::<AppState>().lock().unwrap().season_league = Some(league);
+        let league = poeapi::season_league();
+        let st = app.state::<AppState>();
+        let mut st = st.lock().unwrap();
+        // offline or the site down: the next time the Items section opens asks again
+        let Some(league) = league else {
+            st.season_tried = false;
+            return;
+        };
+        st.season_league = Some(league);
+        drop(st);
         let _ = app.emit("items", ());
     });
 }
@@ -521,7 +552,13 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
     let mut frontmost = foreground::frontmost_app();
     let mut key = "none yet";
     for msg in rx {
-        let in_poe = foreground::is_poe(&frontmost);
+        let mut in_poe = foreground::is_poe(&frontmost);
+        // the frontmost app is polled twice a second: a hotkey pressed just after switching
+        // to the game asks again rather than being dropped
+        if !in_poe && matches!(msg, Msg::Hotkey | Msg::GemHotkey | Msg::GuideHotkey) {
+            frontmost = foreground::frontmost_app();
+            in_poe = foreground::is_poe(&frontmost);
+        }
         match msg {
             // showing needs the game in front; hiding works from anywhere
             Msg::Hotkey if in_poe || visible => {
@@ -550,14 +587,22 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
                 continue;
             }
             Msg::Frontmost(name, frame) => {
+                let shown = visible || gems_visible || guide_visible;
                 let moved = {
                     let st = app.state::<AppState>();
                     let mut st = st.lock().unwrap();
+                    // the poll looks for the game window only while a panel shows; one sent just
+                    // before a panel opened has none, so the frame found on opening stays
+                    let frame = match frame {
+                        _ if !shown => None,
+                        None if foreground::is_poe(&name) => st.frame,
+                        frame => frame,
+                    };
                     let moved = st.frame != frame;
                     st.frame = frame;
                     moved
                 };
-                if name == frontmost && !(moved && (visible || gems_visible || guide_visible)) {
+                if name == frontmost && !(moved && shown) {
                     continue;
                 }
                 // leaving the game hides the panels; coming back doesn't reopen them
@@ -570,6 +615,17 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
             }
             Msg::Rebind(binds) => keys::rebind(&app, binds),
             _ => continue,
+        }
+        let shown = visible || gems_visible || guide_visible;
+        PANELS_SHOWN.store(shown, Ordering::Relaxed);
+        // a panel opening needs the game window now, not at the next poll
+        if shown && foreground::is_poe(&frontmost) {
+            let st = app.state::<AppState>();
+            let missing = st.lock().unwrap().frame.is_none();
+            if missing {
+                let frame = gamewin::frontmost_frame();
+                st.lock().unwrap().frame = frame;
+            }
         }
         // take the binds from the game only while it's in front (zoom and pan only with the panel shown)
         let want = if foreground::is_poe(&frontmost) { keys::TOGGLE | if visible { keys::VIEW } else { 0 } } else { 0 };
@@ -605,10 +661,13 @@ fn run_toggle_loop(app: AppHandle, rx: mpsc::Receiver<Msg>) {
     }
 }
 
+/// Whether any in-game panel shows: only then does the poll look for the game window.
+static PANELS_SHOWN: AtomicBool = AtomicBool::new(false);
+
 fn poll_frontmost(tx: mpsc::Sender<Msg>) {
     loop {
         let app = foreground::frontmost_app();
-        let frame = if foreground::is_poe(&app) { gamewin::frontmost_frame() } else { None };
+        let frame = if PANELS_SHOWN.load(Ordering::Relaxed) && foreground::is_poe(&app) { gamewin::frontmost_frame() } else { None };
         if tx.send(Msg::Frontmost(app, frame)).is_err() {
             return;
         }
@@ -624,7 +683,7 @@ fn spec_choices(build: &pob::Build) -> Vec<SpecChoice> {
         .specs
         .iter()
         .map(|s| {
-            let plan = tree::Plan::new(tree::tree(), s).ok();
+            let plan = tree::Plan::cached(s).ok();
             let asc = plan.as_ref().and_then(|p| p.asc.as_ref());
             SpecChoice {
                 title: s.title.clone(),
@@ -640,7 +699,7 @@ fn panel_view_of(app: &App) -> Option<tree::PanelView> {
     let saved = &app.saved;
     let build = saved.build.as_ref()?;
     let spec = build.specs.get(saved.spec)?;
-    let mut view = match tree::Plan::new(tree::tree(), spec) {
+    let mut view = match tree::Plan::cached(spec) {
         Ok(plan) => {
             let allocated: HashSet<u32> = saved.allocated.iter().copied().collect();
             plan.view(tree::tree(), &allocated, saved.points)
@@ -706,9 +765,11 @@ fn on_log_line(handle: &AppHandle, line: &str) {
         _ if app.paused_for().is_some() => false,
         clientlog::Event::Allocated { id, name } => {
             let Some(build) = app.saved.build.as_ref() else { return };
-            let Some(Ok(plan)) = build.specs.get(app.saved.spec).map(|s| tree::Plan::new(t, s)) else { return };
+            let Some(Ok(plan)) = build.specs.get(app.saved.spec).map(tree::Plan::cached) else { return };
             let have: HashSet<u32> = app.saved.allocated.iter().copied().collect();
-            match t.node_for_log(&id, &name, plan.candidates(t, &have)) {
+            // the candidates only when the log's id isn't on the tree, which is rare
+            let candidates = std::iter::once(()).flat_map(|_| plan.candidates(t, &have));
+            match t.node_for_log(&id, &name, candidates) {
                 // nodes the app doesn't track (Bloodlines, cluster jewels) are left out
                 Some(hash) if t.knows(hash) && !have.contains(&hash) => {
                     app.saved.allocated.push(hash);
@@ -752,8 +813,11 @@ fn on_log_line(handle: &AppHandle, line: &str) {
             let _ = handle.emit("guide", ());
             let s = &app.saved;
             let spec = s.build.as_ref().and_then(|b| b.specs.get(s.spec));
-            if let Some(spec) = spec.filter(|_| !app.refunding.is_empty() && !app.refund_unchecked && !s.account.is_empty()) {
-                settle_refunds(handle, s.account.clone(), s.character.clone(), spec.clone());
+            let idle = app.refund_job != Some(app.epoch);
+            if let Some(spec) = spec.filter(|_| idle && !app.refunding.is_empty() && !app.refund_unchecked && !s.account.is_empty()) {
+                let job = (s.account.clone(), s.character.clone(), spec.clone());
+                app.refund_job = Some(app.epoch);
+                settle_refunds(handle, job, app.epoch, app.refunding.clone());
             }
             false
         }
@@ -761,28 +825,44 @@ fn on_log_line(handle: &AppHandle, line: &str) {
     if changed {
         app.synced = None;
         let _ = store::save(&app.path, &app.saved);
-        let _ = handle.emit("plan", panel_view_of(app));
+        emit_plan(handle, panel_view_of(app));
     }
 }
 
-/// Imports the Character from pathofexile.com to learn which pending refunds were
-/// applied. When it can't, the refunds wait for a Re-sync.
-fn settle_refunds(handle: &AppHandle, account: String, character: String, spec: pob::Spec) {
+/// Imports the Character from pathofexile.com to learn which pending refunds (`sent`)
+/// were applied. When it can't, the refunds wait for a Re-sync. `epoch` is the Loadout's
+/// when it started: if another became active since, the answer isn't its.
+fn settle_refunds(handle: &AppHandle, (account, character, spec): (String, String, pob::Spec), epoch: u64, sent: Vec<u32>) {
     let app = handle.clone();
     std::thread::spawn(move || {
         let imported = import_allocated(&account, &character, &spec);
         let st = app.state::<AppState>();
         let mut st = st.lock().unwrap();
+        if st.refund_job == Some(epoch) {
+            st.refund_job = None;
+        }
+        if st.epoch != epoch {
+            return;
+        }
         match imported {
             Ok(allocated) => {
                 st.saved.allocated = allocated;
-                st.refunding.clear();
+                // refunds clicked after the import set out wait for the next area change
+                let App { refunding, saved, .. } = &mut *st;
+                refunding.retain(|n| !sent.contains(n) && saved.allocated.contains(n));
                 let _ = store::save(&st.path, &st.saved);
             }
             Err(_) => st.refund_unchecked = true,
         }
-        let _ = app.emit("plan", panel_view_of(&st));
+        emit_plan(&app, panel_view_of(&st));
     });
+}
+
+/// Tells the windows the points changed: the Corner panel draws the view it's sent, and the
+/// Main window fetches what it shows. The Gem and Guide panels have events of their own.
+fn emit_plan(handle: &AppHandle, view: Option<tree::PanelView>) {
+    let _ = handle.emit_to("corner", "plan", view);
+    let _ = handle.emit_to("main", "plan", ());
 }
 
 /// Follows Client.txt for the app's lifetime, switching files when the player picks another.
@@ -794,7 +874,7 @@ fn follow_log(handle: AppHandle) {
             let mut app = state.lock().unwrap();
             if app.watching != path {
                 app.watching = path.clone();
-                let _ = handle.emit("plan", panel_view_of(&app));
+                emit_plan(&handle, panel_view_of(&app));
             }
         }
         let Some(path) = path else {
@@ -832,22 +912,23 @@ async fn load_build(input: String, state: State<'_, AppState>) -> Result<Loaded,
 }
 
 /// The spec's points in the order the panel will suggest them.
-#[tauri::command]
+#[tauri::command(async)]
 fn spec_order(spec: usize, state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let app = state.lock().unwrap();
     let build = app.pending.as_ref().map(|(_, b)| b).or(app.saved.build.as_ref()).ok_or("No build loaded.")?;
-    let plan = tree::Plan::new(tree::tree(), build.specs.get(spec).ok_or("No such tree spec.")?)?;
+    let plan = tree::Plan::cached(build.specs.get(spec).ok_or("No such tree spec.")?)?;
     let t = tree::tree();
     Ok(plan.order(t, &HashSet::new()).iter().map(|id| t.nodes[id].name.clone()).collect())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn current_setup(state: State<'_, AppState>) -> Setup {
     current_setup_of(&state.lock().unwrap())
 }
 
 fn current_setup_of(app: &App) -> Setup {
     let saved = &app.saved;
+    let view = panel_view_of(app);
     Setup {
         name: saved.loadouts.get(saved.active).map(|l| l.name.clone()).unwrap_or_default(),
         known: saved.known_characters(),
@@ -855,8 +936,8 @@ fn current_setup_of(app: &App) -> Setup {
         account: saved.account.clone(),
         character: saved.character.clone(),
         spec: saved.spec,
-        taken: panel_view_of(app).map_or(0, |v| v.done),
-        asc_taken: panel_view_of(app).and_then(|v| v.asc).map_or(0, |a| a.done),
+        taken: view.as_ref().map_or(0, |v| v.done),
+        asc_taken: view.and_then(|v| v.asc).map_or(0, |a| a.done),
         points: saved.points,
         specs: saved.build.as_ref().map(spec_choices).unwrap_or_default(),
         tree_version: tree::tree().version.clone(),
@@ -899,7 +980,7 @@ const CLASSES: [&str; 7] = ["Scion", "Marauder", "Ranger", "Witch", "Duelist", "
 /// The Character's allocated nodes, imported from pathofexile.com.
 fn import_allocated(account: &str, character: &str, spec: &pob::Spec) -> Result<Vec<u32>, String> {
     let t = tree::tree();
-    let plan = tree::Plan::new(t, spec)?;
+    let plan = tree::Plan::cached(spec)?;
     let passives = poeapi::passives(account, character)?;
     if passives.class_id != spec.class_id {
         let class = |id: u32| CLASSES.get(id as usize).copied().unwrap_or("another class");
@@ -919,6 +1000,9 @@ fn import_allocated(account: &str, character: &str, spec: &pob::Spec) -> Result<
 async fn find_characters(account: String) -> Result<Vec<poeapi::Character>, String> {
     tauri::async_runtime::spawn_blocking(move || poeapi::characters(&account)).await.map_err(|e| e.to_string())?
 }
+
+const SWITCHED_UNDER: &str =
+    "Another loadout became active while you were editing (the game log showed another character), so nothing was saved. Open the editor again.";
 
 /// Saves the setup. With `taken` the Seed is the first points in order (and the first
 /// `asc_taken` Ascendancy points); without, it's imported from pathofexile.com.
@@ -941,8 +1025,11 @@ async fn save_setup(
     if name.is_empty() {
         return Err("Give this loadout a name.".into());
     }
-    let (chosen, kept, tracked) = {
+    let (chosen, kept, tracked, epoch) = {
         let st = state.lock().unwrap();
+        if st.editor_epoch.is_some_and(|e| e != st.epoch) {
+            return Err(SWITCHED_UNDER.into());
+        }
         // a new Loadout has only the build loaded for it, never the active one's
         let saved_build = if create { None } else { st.saved.build.as_ref() };
         let build = st.pending.as_ref().map(|(_, b)| b).or(saved_build).ok_or("Load a build first.")?;
@@ -959,12 +1046,12 @@ async fn save_setup(
             && taken == view.as_ref().map(|v| v.done)
             && asc_taken.unwrap_or(0) == view.and_then(|v| v.asc).map_or(0, |a| a.done);
         let kept = if keep { tracked.as_ref().map(|t| t.allocated.clone()) } else { unchanged.then(|| st.saved.allocated.clone()) };
-        (build.specs.get(spec).ok_or("Pick a tree spec.")?.clone(), kept, tracked)
+        (build.specs.get(spec).ok_or("Pick a tree spec.")?.clone(), kept, tracked, st.epoch)
     };
     let allocated = match (kept, taken) {
         (Some(kept), _) => kept,
         (None, Some(taken)) => {
-            let plan = tree::Plan::new(tree::tree(), &chosen)?;
+            let plan = tree::Plan::cached(&chosen)?;
             let mut allocated: Vec<u32> = plan.seed(tree::tree(), taken, asc_taken.unwrap_or(0)).into_iter().collect();
             allocated.sort_unstable();
             allocated
@@ -978,6 +1065,12 @@ async fn save_setup(
     };
     let mut guard = state.lock().unwrap();
     let st = &mut *guard;
+    // the game log switched Loadouts while importing: these points are for the one being edited
+    if st.epoch != epoch {
+        return Err("The loadout changed while importing, so nothing was saved. Save again.".into());
+    }
+    st.epoch += 1;
+    st.editor_epoch = None;
     if create {
         st.saved.new_loadout(false);
         st.gems = Gems::default();
@@ -1009,7 +1102,7 @@ async fn save_setup(
     st.playing = None;
     st.synced = None;
     loadouts_changed(&app, st)?;
-    let _ = app.emit("plan", panel_view_of(st));
+    emit_plan(&app, panel_view_of(st));
     drop(guard);
     let _ = app.emit("items", ());
     let _ = app.emit("guide", ());
@@ -1025,7 +1118,7 @@ fn set_points(points: usize, app: AppHandle, state: State<'_, AppState>) -> Resu
     let st = &mut *guard;
     st.saved.points = points.clamp(1, MAX_POINTS);
     store::save(&st.path, &st.saved)?;
-    let _ = app.emit("plan", panel_view_of(st));
+    emit_plan(&app, panel_view_of(st));
     Ok(st.saved.points)
 }
 
@@ -1128,7 +1221,7 @@ fn resync(app: &AppHandle) {
         let s = &st.saved;
         match s.build.as_ref().and_then(|b| b.specs.get(s.spec)) {
             Some(spec) if !s.account.is_empty() && !s.character.is_empty() => {
-                Some((s.account.clone(), s.character.clone(), spec.clone()))
+                Some((s.account.clone(), s.character.clone(), spec.clone(), st.epoch))
             }
             _ => None,
         }
@@ -1136,7 +1229,7 @@ fn resync(app: &AppHandle) {
     if job.is_some() {
         import_gems(app, true);
     }
-    let Some((account, character, spec)) = job else {
+    let Some((account, character, spec, epoch)) = job else {
         let has_build = app.state::<AppState>().lock().unwrap().saved.build.is_some();
         if has_build {
             let _ = app.emit_to(
@@ -1152,13 +1245,19 @@ fn resync(app: &AppHandle) {
         Ok(allocated) => {
             let st = app.state::<AppState>();
             let mut st = st.lock().unwrap();
+            // another Loadout became active while importing: these points aren't its
+            if st.epoch != epoch {
+                drop(st);
+                let _ = app.emit_to("main", "resynced", "Re-sync stopped: another loadout became active");
+                return;
+            }
             st.saved.allocated = allocated;
             st.playing = None;
             st.refunding.clear();
             st.refund_unchecked = false;
             st.synced = Some(format!("Re-synced {character} from pathofexile.com"));
             let _ = store::save(&st.path, &st.saved);
-            let _ = app.emit("plan", panel_view_of(&st));
+            emit_plan(&app, panel_view_of(&st));
             let _ = app.emit_to("main", "resynced", format!("Re-synced {character}"));
         }
         Err(e) => {
@@ -1252,7 +1351,7 @@ struct GuideView {
     layout: Option<layouts::LayoutView>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn guide_view(state: State<'_, AppState>) -> GuideView {
     let st = state.lock().unwrap();
     let route = guide::route();
@@ -1357,7 +1456,7 @@ fn guide_options(options: guide::Options, app: AppHandle, state: State<'_, AppSt
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn panel_view(state: State<'_, AppState>) -> Option<tree::PanelView> {
     panel_view_of(&state.lock().unwrap())
 }
@@ -1374,14 +1473,14 @@ struct BuildView {
     character: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn build_view(state: State<'_, AppState>) -> Option<BuildView> {
     let app = state.lock().unwrap();
     let saved = &app.saved;
     let build = saved.build.as_ref()?;
     let allocated: HashSet<u32> = saved.allocated.iter().copied().collect();
     // an unreadable spec still opens, so the player can pick another one
-    let plan = tree::Plan::new(tree::tree(), build.specs.get(saved.spec)?);
+    let plan = tree::Plan::cached(build.specs.get(saved.spec)?);
     let points = plan.as_ref().map(|plan| plan.points(tree::tree(), &allocated)).unwrap_or_default();
     let asc_points = plan
         .as_ref()
@@ -1406,6 +1505,12 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
     let title = st.saved.build.as_ref().and_then(|b| b.specs.get(spec)).ok_or("No such tree spec.")?.title.clone();
     st.saved.spec = spec;
     st.saved.skill_set = None;
+    // imports for the old spec land nowhere; the editor open on this Loadout stays good
+    let open_here = st.editor_epoch == Some(st.epoch);
+    st.epoch += 1;
+    if open_here {
+        st.editor_epoch = Some(st.epoch);
+    }
     // a hand Seed only counted the old spec's points; an import holds them all
     st.synced = st
         .saved
@@ -1413,8 +1518,12 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
         .is_empty()
         .then(|| format!("Switched to {title}: Re-sync character so your taken points count"));
     loadouts_changed(&app, &mut st)?;
-    let _ = app.emit("plan", panel_view_of(&st));
-    let _ = app.emit("gems", ());
+    emit_plan(&app, panel_view_of(&st));
+    drop(st);
+    // the Guide's gems follow the spec's class
+    for event in ["gems", "guide"] {
+        let _ = app.emit(event, ());
+    }
     Ok(())
 }
 
@@ -1424,6 +1533,7 @@ fn set_spec(spec: usize, app: AppHandle, state: State<'_, AppState>) -> Result<(
 /// name shows, and every window catches up. The caller holds the state, so
 /// anything that locks it again runs on its own thread.
 fn switched(handle: &AppHandle, st: &mut App) {
+    st.epoch += 1;
     st.pending = None;
     st.gems = Gems::default();
     st.refunding.clear();
@@ -1431,7 +1541,7 @@ fn switched(handle: &AppHandle, st: &mut App) {
     let name = st.saved.loadouts.get(st.saved.active).map(store::loadout_name).unwrap_or_default();
     st.synced = Some(format!("Switched to {name}"));
     let _ = store::save(&st.path, &st.saved);
-    let _ = handle.emit("plan", panel_view_of(st));
+    emit_plan(handle, panel_view_of(st));
     for event in ["gems", "items", "guide"] {
         let _ = handle.emit(event, ());
     }
@@ -1478,6 +1588,7 @@ fn open_editor(mode: String, index: usize, app: AppHandle) -> Result<Setup, Stri
     let st = app.state::<AppState>();
     let mut st = st.lock().unwrap();
     st.pending = None;
+    st.editor_epoch = Some(st.epoch);
     let mut setup = current_setup_of(&st);
     match mode.as_str() {
         "edit" => {}
@@ -1511,7 +1622,9 @@ fn open_editor(mode: String, index: usize, app: AppHandle) -> Result<Setup, Stri
 /// The editor closed without saving: forget the build loaded in it.
 #[tauri::command]
 fn close_editor(state: State<'_, AppState>) {
-    state.lock().unwrap().pending = None;
+    let mut st = state.lock().unwrap();
+    st.pending = None;
+    st.editor_epoch = None;
 }
 
 #[tauri::command]
@@ -1749,7 +1862,7 @@ pub fn run() {
                 Vec::new()
             };
             let show_whats_new = !whats_new.is_empty();
-            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, update_ready: None, update_offer: None, whats_new, gems: Gems::default(), area: None, seed: 0, picks: layouts::Picks::default(), season_league: None, season_tried: false }));
+            app.manage(Mutex::new(App { path, saved, pending: None, watching: None, playing: None, synced: None, frame: None, drag_from: None, refunding: Vec::new(), refund_unchecked: false, refund_job: None, epoch: 0, editor_epoch: None, gems_job: 0, update_ready: None, update_offer: None, whats_new, gems: Gems::default(), area: None, seed: 0, picks: layouts::Picks::default(), season_league: None, season_tried: false }));
             upgrade_build(app.handle().clone());
 
             #[cfg(target_os = "macos")]

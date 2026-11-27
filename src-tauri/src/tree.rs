@@ -3,7 +3,8 @@
 use crate::pob::Spec;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::OnceLock;
+use std::hash::{Hash, Hasher};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Cluster jewel nodes live at these hashes and up; no tree data has them.
 const CLUSTER_MIN: u32 = 65536;
@@ -394,6 +395,30 @@ impl AscPlan {
 }
 
 impl Plan {
+    /// `Plan::new` on the bundled tree, remembered per spec: every tick, view and Tree spec
+    /// list needs the plans, and a spec's plan never changes while the app runs.
+    pub fn cached(spec: &Spec) -> Result<Arc<Plan>, String> {
+        type Plans = Mutex<HashMap<u64, Result<Arc<Plan>, String>>>;
+        static PLANS: OnceLock<Plans> = OnceLock::new();
+        let key = {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (&spec.title, &spec.tree_version, spec.class_id, &spec.nodes, &spec.masteries).hash(&mut h);
+            h.finish()
+        };
+        let plans = PLANS.get_or_init(Default::default);
+        if let Some(plan) = plans.lock().unwrap().get(&key) {
+            return plan.clone();
+        }
+        let plan = Plan::new(tree(), spec).map(Arc::new);
+        let mut plans = plans.lock().unwrap();
+        // a few builds' specs at most; pasting many builds in one session starts it afresh
+        if plans.len() >= 64 {
+            plans.clear();
+        }
+        plans.insert(key, plan.clone());
+        plan
+    }
+
     pub fn new(tree: &Tree, spec: &Spec) -> Result<Plan, String> {
         let start = tree
             .nodes

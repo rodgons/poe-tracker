@@ -3,48 +3,43 @@
 <head>
 <meta charset="utf-8">
 <title>POE Tracker</title>
+<link rel="stylesheet" href="theme.css">
 <style>
   /* Corner panel: the whole tree spec, the next points numbered (variant D of the prototype). */
-  :root {
-    /* Path of Exile's palette: near-black panels, bronze frame, gold for taken points,
-       Magic-item blue for what's next, red for refunds */
-    --scene: #0b0a08; --scene2: #1a1712; --ink: #e0d6c3; --dim: #aa9e82; --faint: #4a4135;
-    --alloc: #d9b45a; --next: #8888ff; --plan: #8a8072; --other: #2a251e; --refund: #e04a3f;
-    --panel: rgba(11, 10, 8, .94); --edge: #6e5a3a;
-    --display: "Cinzel", "Trajan Pro", Georgia, serif;
-    --body: -apple-system, "Segoe UI", system-ui, sans-serif;
-    --mono: ui-monospace, Menlo, Consolas, monospace;
-  }
+  /* tokens and type: theme.css. A panel sits over the game, so its backing is near-solid and it
+     keeps the brighter bronze frame; no dark canvas behind the transparent window. */
+  :root { color-scheme: normal; --panel: rgba(11, 10, 8, .96); --edge: #6e5a3a; }
   html, body { margin: 0; background: transparent; color: var(--ink); font-family: var(--body); }
   .panel {
     margin: 8px; padding: 12px 14px; border-radius: 8px; background: var(--panel);
-    border: 1px solid var(--edge); display: flex; flex-direction: column; gap: 10px;
+    border: 1px solid var(--edge); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 2px 8px rgba(0, 0, 0, .55);
   }
   .hd { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-  .hd h1 { margin: 0; min-width: 0; font: 600 13px/1.2 var(--display); letter-spacing: .06em; color: var(--alloc);
+  .hd h1 { margin: 0; min-width: 0; font: 700 15px/1.25 var(--display); letter-spacing: .04em; color: var(--alloc);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .hd span { font: 500 11px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; max-width: 60%; }
-  .hd span b { font-weight: 500; color: var(--ink); }
+  .hd span { font: 600 13px var(--body); font-variant-numeric: tabular-nums; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; max-width: 60%; }
+  .hd span b { font-weight: 600; color: var(--ink); }
+  .hd .zm { font-style: normal; }
   /* something the player must act on: points have stopped ticking, or the hotkey can't work */
-  .banner { display: flex; gap: 7px; padding: 7px 9px; border-radius: 4px; font-size: 11.5px; line-height: 1.4;
+  .banner { display: flex; gap: 7px; padding: 7px 9px; border-radius: 6px; font-size: 13px; line-height: 1.4;
     color: var(--ink); background: rgba(224, 74, 63, .12); border: 1px solid rgba(224, 74, 63, .45); }
   .banner svg { flex: none; width: 13px; height: 13px; margin-top: 1px; }
   /* a stopped tracker can't stand behind its Next points, so the tree steps back */
   .stage.stopped svg { opacity: .35; filter: grayscale(.7); }
-  .bar { height: 4px; background: var(--faint); border-radius: 2px; overflow: hidden; }
+  .bar { height: 5px; background: var(--faint); border-radius: 2px; overflow: hidden; }
   .bar i { display: block; height: 100%; background: var(--alloc); }
   svg { display: block; width: 100%; height: auto; touch-action: none; }
   /* the Ascendancy inset sits over the Mini-tree's bottom-left corner, apart from its zoom and drag */
   .stage { position: relative; }
   .asc { position: absolute; left: 0; bottom: 0; background: var(--panel); border: 1px solid var(--edge); border-radius: 6px; overflow: hidden; }
-  .asc-hd { display: flex; justify-content: space-between; gap: 6px; padding: 3px 6px 0; font: 600 10px/1.2 var(--display);
-    letter-spacing: .05em; color: var(--alloc); white-space: nowrap; }
+  .asc-hd { display: flex; justify-content: space-between; gap: 6px; padding: 3px 6px 0; font: 700 11.5px/1.25 var(--display);
+    letter-spacing: .04em; color: var(--alloc); white-space: nowrap; }
   .asc-hd span { overflow: hidden; text-overflow: ellipsis; }
-  .asc-hd b { font: 500 10px var(--mono); color: var(--dim); }
+  .asc-hd b { font: 600 11.5px var(--body); font-variant-numeric: tabular-nums; color: var(--dim); }
   svg.zoomed { cursor: grab; }
   svg.dragging { cursor: grabbing; }
   .hd { cursor: move; user-select: none; -webkit-user-select: none; }
-  .meta { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--dim); }
+  .meta { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--dim); }
   .meta .refund { color: var(--refund); }
   .meta .note { color: var(--plan); }
   /* the controls hint: shown on the first few launches, then only while the mouse is on the panel */
@@ -54,7 +49,7 @@
   .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; }
   .legend > span, .meta .refund, .meta .pending { display: inline-flex; align-items: center; gap: 5px; }
   .meta svg.swatch { display: inline-block; width: 14px; height: 14px; flex: none; }
-  .empty { font-size: 12.5px; line-height: 1.5; color: var(--dim); }
+  .empty { font-size: 14px; line-height: 1.5; color: var(--dim); }
   .empty b { color: var(--alloc); }
 </style>
 </head>
@@ -110,14 +105,22 @@
     const notes = v.notices.length ? `<span class="note">${v.notices.map(esc).join(' · ')}</span>` : ''
     const stopped = v.stopped ? `<div class="banner">${icon.pause}<span>${esc(v.stopped)}</span></div>` : ''
     const who = v.character ? `<b>${esc(v.character)}</b> · ` : ''
-    const zoom = cam.zoom > 1 ? ` · ×${cam.zoom.toFixed(1)}` : ''
     const tree = MiniTree.draw(v, 392, 0.72, cam)
     panel.innerHTML = `
-      <div class="hd" title="${esc(v.spec)} · drag to move the panel"><h1>${esc(v.spec)}</h1><span>${who}${v.done} / ${v.total}${zoom}</span></div>
+      <div class="hd" title="${esc(v.spec)} · drag to move the panel"><h1>${esc(v.spec)}</h1><span>${who}${v.done} / ${v.total}<i class="zm">${zoomText()}</i></span></div>
       <div class="bar"><i style="width:${v.total ? 100 * v.done / v.total : 0}%"></i></div>
       ${stopped}${warn}
       <div class="stage${v.stopped ? ' stopped' : ''}">${tree}${v.asc ? MiniTree.inset(v.asc, 140, { pending: v.pending }) : ''}</div>
       <div class="meta">${legend}${refunds}${pendingNote}${notes}<span class="keys">${hotkey} hide · scroll to zoom, drag to move · drag the title to move the panel</span></div>`
+  }
+
+  const zoomText = () => cam.zoom > 1 ? ` · ×${cam.zoom.toFixed(1)}` : ''
+  // zooming and panning redraw only the Mini-tree, not the whole panel
+  function redrawTree() {
+    const stage = panel.querySelector('.stage'), zm = panel.querySelector('.hd .zm')
+    if (!stage || !zm || !view || view.error || !view.total) return render(view)
+    stage.innerHTML = MiniTree.draw(view, 392, 0.72, cam) + (view.asc ? MiniTree.inset(view.asc, 140, { pending: view.pending }) : '')
+    zm.textContent = zoomText()
   }
 
   let view = null
@@ -144,9 +147,9 @@
   const useBinds = b => { hotkey = KeyLabel.format(b.toggle); render(view) }
   invoke('key_binds').then(useBinds)
   listen('binds', e => useBinds(e.payload))
-  listen('zoom', e => { MiniTree.key(cam, e.payload); keepZoom(); render(view) })
-  listen('pan', e => { MiniTree.pan(cam, e.payload); render(view) })
-  MiniTree.attach(panel, cam, () => render(view), keepZoom)
+  listen('zoom', e => { MiniTree.key(cam, e.payload); keepZoom(); redrawTree() })
+  listen('pan', e => { MiniTree.pan(cam, e.payload); redrawTree() })
+  MiniTree.attach(panel, cam, redrawTree, keepZoom)
 
   // dragging the title moves the panel within the game window; the app remembers the spot
   let moving = null
@@ -156,10 +159,17 @@
     panel.setPointerCapture(e.pointerId)
     invoke('drag_panel', { phase: 'start', dx: 0, dy: 0 })
   })
+  // at most one move per frame: pointer events can come faster than the window can follow
+  let moveQueued = false
   panel.addEventListener('pointermove', e => {
     if (!moving) return
     moving.dx = e.screenX - moving.x; moving.dy = e.screenY - moving.y
-    invoke('drag_panel', { phase: 'move', dx: moving.dx, dy: moving.dy })
+    if (moveQueued) return
+    moveQueued = true
+    requestAnimationFrame(() => {
+      moveQueued = false
+      if (moving) invoke('drag_panel', { phase: 'move', dx: moving.dx, dy: moving.dy })
+    })
   })
   // a drag that ends without a pointerup (capture lost) still ends, where it last was,
   // or the app would think it's still dragging and stop placing the panel

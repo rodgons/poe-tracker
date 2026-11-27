@@ -3,292 +3,302 @@
 <head>
 <meta charset="utf-8">
 <title>POE Tracker</title>
+<link rel="stylesheet" href="theme.css">
 <style>
-  /* Main window: the one app window away from the game, in sections (Tree, Gems, Build, Settings). */
-  :root {
-    color-scheme: dark;
-    /* Path of Exile's palette: near-black panels, bronze frame, gold for taken points,
-       Magic-item blue for what's next, red for refunds */
-    --scene: #0b0a08; --scene2: #1a1712; --ink: #e0d6c3; --dim: #aa9e82; --faint: #4a4135;
-    --alloc: #d9b45a; --next: #8888ff; --plan: #8a8072; --other: #2a251e; --refund: #e04a3f;
-    --kill: #e09a4f; --item: #c9b98f; --ok: #7fbf6a;
-    --card: #141210; --edge: #3b3328;
-    /* the game's item text: normal, rare, unique, mods, crafted and fractured lines */
-    --inormal: #c8c8c8; --irare: #ffff77; --iunique: #af6025; --imod: #8888ff; --icraft: #b4b4ff; --ifrac: #a29162;
-    --display: "Cinzel", "Trajan Pro", Georgia, serif;
-    --body: -apple-system, "Segoe UI", system-ui, sans-serif;
-    --mono: ui-monospace, Menlo, Consolas, monospace;
-  }
+  /* Main window: the one app window away from the game, in sections (Tree, Gems, Items, Guide, Build, Settings).
+     Tokens and type come from theme.css. Hierarchy: Cinzel gold for what a page is, ink for what to read,
+     muted tones for what's done or secondary, and the state hues only where something needs doing. */
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--scene); color: var(--ink); font: 13px/1.5 var(--body); }
-  ::selection { background: rgba(217, 180, 90, .35); color: var(--ink); }
-  body { display: grid; grid-template-columns: 188px 1fr; }
+  html, body { margin: 0; height: 100%; background: var(--scene); color: var(--ink); font: 15px/1.5 var(--body); }
+  body { display: grid; grid-template-columns: 196px 1fr; }
 
   /* sidebar: the sections, then the app's version and any update waiting */
-  nav { display: flex; flex-direction: column; gap: 2px; padding: 16px 10px 12px; background: var(--card); border-right: 1px solid var(--edge); }
-  nav .brand { margin: 0 8px 14px; font: 600 14px var(--display); letter-spacing: .06em; color: var(--alloc); }
+  nav { display: flex; flex-direction: column; gap: 2px; padding: 18px 10px 12px; background: var(--card); border-right: 1px solid var(--edge); }
+  nav .brand { margin: 0 10px 16px; font: 700 16px var(--display); letter-spacing: .06em; color: var(--alloc); }
   nav button.go {
-    display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 7px 10px;
-    background: none; border: 0; border-radius: 6px; color: var(--dim); font: 500 13px var(--body); text-align: left; cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px 10px;
+    background: none; border: 1px solid transparent; border-radius: 6px; color: var(--dim); font: 500 15px var(--body); text-align: left; cursor: pointer;
   }
   nav button.go:hover { background: var(--scene2); color: var(--ink); }
-  nav button.go[aria-current="page"] { background: var(--scene2); color: var(--alloc); }
+  nav button.go[aria-current="page"] { background: var(--alloc-bg); border-color: rgba(217, 180, 90, .35); color: var(--alloc); font-weight: 600; }
   nav button.go:focus-visible { outline: 2px solid var(--alloc); outline-offset: -2px; }
   /* a Build draft not saved yet */
-  nav .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--next); }
+  nav .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--next); }
   nav .dot[hidden] { display: none; }
-  nav footer { margin-top: auto; padding: 0 8px; display: flex; flex-direction: column; gap: 8px; font: 500 11px var(--mono); color: var(--plan); }
-  nav footer button { font-size: 12px; padding: 6px 10px; }
+  nav footer { margin-top: auto; padding: 0 4px; display: flex; flex-direction: column; gap: 8px; font: 500 12px var(--body); color: var(--plan); }
+  nav footer button { font-size: 13px; padding: 7px 10px; }
   /* Re-sync: reachable from every section once a Build is saved */
   nav .sync { display: flex; flex-direction: column; gap: 4px; margin: 0 0 6px; }
   nav .sync[hidden] { display: none; }
-  nav .sync span { font: 400 11px var(--body); color: var(--dim); min-height: 1.4em; }
+  nav .sync span { font: 400 12px var(--body); color: var(--dim); min-height: 1.4em; }
   nav .sync span.bad { color: var(--refund); }
   /* a newer version: offered in the sidebar on every section */
-  nav .upd { display: flex; flex-direction: column; gap: 4px; padding: 8px 9px; border-radius: 6px;
+  nav .upd { display: flex; flex-direction: column; gap: 5px; padding: 9px 10px; border-radius: 8px;
     background: rgba(111, 224, 79, .08); border: 1px solid rgba(111, 224, 79, .45); }
   nav .upd[hidden] { display: none; }
-  nav .upd small { font: 600 9.5px var(--body); letter-spacing: .08em; text-transform: uppercase; color: #6fe04f; }
-  nav .upd span { font: 400 11.5px var(--body); color: var(--ink); }
-  nav .upd .upd-err { color: var(--refund); font-size: 11px; }
+  nav .upd small { font: 700 11px var(--body); letter-spacing: .08em; text-transform: uppercase; color: #6fe04f; }
+  nav .upd span { font: 400 13px/1.35 var(--body); color: var(--ink); }
+  nav .upd .upd-err { color: var(--refund); font-size: 12px; }
   nav .upd .upd-err:empty { display: none; }
   /* What's new: once after each update */
-  dialog#whatsNew { max-width: 520px; width: calc(100% - 32px); max-height: 80vh; padding: 0; border: 1px solid var(--edge);
-    border-radius: 10px; background: var(--card); color: var(--ink); }
-  dialog#whatsNew::backdrop { background: rgba(0, 0, 0, .6); }
-  .wn-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 8px; }
-  .wn-hd h2 { margin: 0; font: 600 16px var(--display); letter-spacing: .05em; color: var(--alloc); }
-  .wn-x { background: none; color: var(--dim); font-size: 20px; line-height: 1; padding: 2px 8px; }
+  dialog#whatsNew { max-width: 520px; width: calc(100% - 32px); max-height: 80vh; padding: 0; border: 1px solid var(--line);
+    border-radius: 12px; background: var(--card); color: var(--ink); box-shadow: 0 16px 48px rgba(0, 0, 0, .6); }
+  dialog#whatsNew::backdrop { background: rgba(0, 0, 0, .65); }
+  .wn-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px 8px; }
+  .wn-hd h2 { margin: 0; font: 700 19px var(--display); letter-spacing: .04em; color: var(--alloc); }
+  .wn-x { background: none; color: var(--dim); font-size: 22px; line-height: 1; padding: 2px 8px; }
   .wn-x:hover { color: var(--ink); }
-  .wn-body { padding: 0 18px 4px; overflow-y: auto; max-height: calc(80vh - 120px); }
-  .wn-body h3 { margin: 12px 0 4px; font: 600 12px var(--mono); color: var(--dim); }
+  .wn-body { padding: 0 20px 4px; overflow-y: auto; max-height: calc(80vh - 130px); }
+  .wn-body h3 { margin: 14px 0 4px; font: 600 13px var(--body); color: var(--dim); }
   .wn-body ul { margin: 0; padding-left: 18px; }
-  .wn-body li { display: list-item; list-style: disc; cursor: default; padding: 0; margin: 4px 0; line-height: 1.45; font-size: 13px; }
-  .wn-ft { display: flex; justify-content: flex-end; padding: 12px 18px 16px; }
+  .wn-body li { display: list-item; list-style: disc; cursor: default; padding: 0; margin: 5px 0; line-height: 1.45; font-size: 14.5px; }
+  .wn-body li::marker { color: var(--alloc); }
+  .wn-ft { display: flex; justify-content: flex-end; padding: 14px 20px 18px; }
 
   /* the loadout being followed, on every section */
   nav .cur-lo { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; text-align: left;
-    background: var(--scene2); color: var(--ink); border: 1px solid var(--edge); border-left: 3px solid var(--alloc); padding: 7px 9px; }
+    background: var(--alloc-bg); color: var(--ink); border: 1px solid rgba(217, 180, 90, .4); padding: 8px 10px; }
   nav .cur-lo[hidden] { display: none; }
-  nav .cur-lo small { font: 600 9.5px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
-  nav .cur-lo b { font: 600 12.5px var(--body); color: var(--alloc); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  nav .cur-lo span { font: 400 11px var(--body); color: var(--dim); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  nav .cur-lo small { font: 700 11px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  nav .cur-lo b { font: 700 14px var(--body); color: var(--alloc); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  nav .cur-lo span { font: 400 12.5px var(--body); color: var(--dim); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* the Build section's loadout list */
   .lo-top { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
   .lo-top h1 { margin: 0 !important; flex: 1; }
-  .lo-row { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--edge); border-radius: 8px; padding: 6px 8px 6px 4px; margin-bottom: 8px; }
-  .lo-row.active { border-color: var(--alloc); box-shadow: inset 3px 0 0 var(--alloc); }
-  .lo-use { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; background: none; color: var(--ink); text-align: left; padding: 6px 8px; }
-  .lo-use:hover b { text-decoration: underline; }
-  .lo-use b { font: 600 13.5px var(--body); color: var(--ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lo-row { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--edge); border-radius: 10px; padding: 6px 10px 6px 4px; margin-bottom: 8px; }
+  .lo-row.active { border-color: rgba(217, 180, 90, .6); background: var(--alloc-bg); }
+  .lo-use { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; background: none; color: var(--ink); text-align: left; padding: 6px 10px; }
+  .lo-use:hover b { text-decoration: underline; text-underline-offset: 3px; }
+  .lo-use b { font: 600 15.5px var(--body); color: var(--ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lo-row.active .lo-use b { color: var(--alloc); }
-  .lo-use span { font: 400 12px var(--body); color: var(--dim); }
-  .lo-row .tag { font: 600 10px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--alloc); padding: 0 6px; }
-  .lo-row button.ghost { padding: 5px 10px; font-size: 12px; }
+  .lo-use span { font: 400 13px var(--body); color: var(--dim); }
+  .lo-row .tag { display: inline-flex; align-items: center; gap: 4px; font: 700 11.5px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--alloc); padding: 0 8px; }
+  .lo-row button.ghost { padding: 6px 12px; font-size: 13px; }
 
   #content { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100vh; }
   /* problems that touch the whole app, each with a way to fix it */
   #banners:empty { display: none; }
   #banners { display: flex; flex-direction: column; gap: 6px; padding: 10px 16px 0; }
-  .banner { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 6px; font-size: 12.5px;
-    color: var(--ink); background: rgba(224, 74, 63, .12); border: 1px solid rgba(224, 74, 63, .45); }
-  .banner svg { flex: none; width: 14px; height: 14px; }
+  .banner { display: flex; gap: 10px; align-items: center; padding: 9px 12px; border-radius: 8px; font-size: 14px;
+    color: var(--ink); background: var(--refund-bg); border: 1px solid rgba(232, 87, 75, .55); }
+  .banner svg { flex: none; width: 16px; height: 16px; }
   .banner span { flex: 1; }
-  .banner button { flex: none; padding: 5px 12px; font-size: 12px; }
+  .banner button { flex: none; padding: 6px 12px; font-size: 13px; }
   section.view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   section.view[hidden] { display: none; }
 
-  /* Tree */
-  .treebar { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--edge); }
-  .treebar .who { color: var(--dim); white-space: nowrap; }
+  /* each section's bar: who, what's picked, how far along */
+  .treebar { display: flex; align-items: center; gap: 14px; padding: 10px 18px; min-height: 56px; background: var(--card); border-bottom: 1px solid var(--edge); }
+  .treebar .who { color: var(--ink); font-weight: 600; white-space: nowrap; }
+  .treebar .who.how { color: var(--dim); font-weight: 400; font-size: 13px; }
   .progress { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 120px; }
-  .bar { flex: 1; height: 5px; background: var(--faint); border-radius: 3px; overflow: hidden; }
+  .bar { flex: 1; height: 6px; background: var(--faint); border-radius: 3px; overflow: hidden; }
   .bar i { display: block; height: 100%; background: var(--alloc); }
-  .progress span { font: 500 12px var(--mono); color: var(--dim); white-space: nowrap; }
+  .progress span { font: 600 13.5px var(--body); font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
   .treebody { flex: 1; display: flex; min-height: 0; }
   #stage { flex: 1; position: relative; min-width: 0; }
   #stage svg { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
   svg.zoomed { cursor: grab; }
   svg.dragging { cursor: grabbing; }
-  #hint { position: absolute; right: 12px; bottom: 10px; color: var(--plan); font-size: 12px; pointer-events: none; }
+  #hint { position: absolute; right: 12px; bottom: 10px; color: var(--plan); font-size: 12.5px; pointer-events: none; }
   /* the Ascendancy inset: bottom-left over the tree, never zoomed or dragged with it */
-  #stage .asc { position: absolute; left: 12px; bottom: 12px; background: var(--card); border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; }
+  #stage .asc { position: absolute; left: 12px; bottom: 12px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; box-shadow: 0 6px 20px rgba(0, 0, 0, .5); }
   #stage .asc svg { position: static; display: block; width: 100%; height: auto; }
-  .asc-hd { display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px 0; font: 600 12px/1.2 var(--display); letter-spacing: .05em; color: var(--alloc); }
-  .asc-hd b { font: 500 11px var(--mono); color: var(--dim); }
-  aside { width: 320px; border-left: 1px solid var(--edge); background: var(--card); overflow-y: auto; padding: 12px 14px; }
-  aside h2 { font: 600 11px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 14px 0 6px; }
+  .asc-hd { display: flex; justify-content: space-between; gap: 8px; padding: 8px 12px 0; font: 700 14px/1.2 var(--display); letter-spacing: .04em; color: var(--alloc); }
+  .asc-hd b { font: 600 13px var(--body); font-variant-numeric: tabular-nums; color: var(--dim); }
+  aside { width: 330px; border-left: 1px solid var(--edge); background: var(--card); overflow-y: auto; padding: 14px 14px 20px; }
+  aside h2 { font: 700 12px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin: 18px 4px 6px; }
   aside h2:first-child { margin-top: 0; }
   ol { list-style: none; margin: 0; padding: 0; }
-  li { display: flex; gap: 8px; align-items: baseline; padding: 3px 4px; border-radius: 4px; cursor: pointer; }
+  li { display: flex; gap: 10px; align-items: center; padding: 3px 6px; border-radius: 6px; cursor: pointer; font-size: 15px; }
   li:hover { background: var(--scene2); }
-  li b { font: 500 11px var(--mono); min-width: 22px; text-align: right; }
-  li.taken, li.taken b { color: var(--alloc); }
-  li.next { color: var(--next); font-weight: 600; }
+  li b { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 20px;
+    font: 600 12px var(--body); font-variant-numeric: tabular-nums; }
+  /* taken: steps back behind a gold check; next: the tree's own numbered blue badge; later: plain number */
+  li.taken { color: var(--plan); }
+  li.taken b { color: var(--alloc); font-size: 14px; }
+  li.next { color: var(--next); font-weight: 700; background: var(--next-bg); }
+  li.next + li.next { margin-top: 2px; }
+  li.next b { width: 20px; min-width: 20px; border-radius: 50%; background: var(--next); color: var(--scene); font-weight: 700; margin: 0 1px; }
   li.later { color: var(--dim); }
+  li.later b { color: var(--plan); font-weight: 500; }
   .refund { color: var(--refund); }
-  .note { color: var(--dim); font-size: 12px; margin: 4px 0; }
+  li.refund b { font-size: 14px; }
+  .note { color: var(--dim); font-size: 14px; margin: 4px 4px 8px; }
   .note.pending { display: flex; gap: 6px; align-items: flex-start; }
-  .note.pending svg { width: 14px; height: 14px; flex: none; margin-top: 1px; }
-  .empty { margin: auto; max-width: 420px; padding: 24px; color: var(--dim); font-size: 14px; text-align: center; }
+  .note.pending svg { width: 15px; height: 15px; flex: none; margin-top: 2px; }
+  .empty { margin: auto; max-width: 440px; padding: 24px; color: var(--dim); font-size: 15px; text-align: center; }
   .empty b { color: var(--alloc); }
-  .empty button { margin-top: 12px; }
+  .empty button { margin-top: 14px; }
   #tip {
-    position: fixed; pointer-events: none; max-width: 300px; padding: 8px 10px; border-radius: 6px;
-    background: rgba(11, 10, 8, .96); border: 1px solid #6e5a3a; font-size: 12px; display: none; z-index: 2;
+    position: fixed; pointer-events: none; max-width: 320px; padding: 9px 12px; border-radius: 8px;
+    background: rgba(11, 10, 8, .97); border: 1px solid #6e5a3a; font-size: 13.5px; display: none; z-index: 2; box-shadow: 0 6px 18px rgba(0, 0, 0, .5);
   }
-  #tip strong { display: block; color: var(--alloc); margin-bottom: 4px; }
+  #tip strong { display: block; color: var(--alloc); margin-bottom: 4px; font-size: 14.5px; }
 
-  /* Gems: the Skill set beside the Character's gems. Every mark has an icon and a word,
-     never colour alone: ✓ had, + missing, ⛓ unlinked, − remove, ○ optional */
-  .gemsbody { flex: 1; overflow-y: auto; padding: 16px 20px 28px; }
-  .gemsbody > div { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
-  .gemsbar .asof { font: 500 12px var(--mono); color: var(--dim); white-space: nowrap; }
-  .gemsbar .asof.old { color: var(--refund); }
-  .tally { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--dim); }
-  .tally b { font-weight: 600; }
-  .gnote { padding: 8px 10px; border-radius: 6px; font-size: 12.5px; background: var(--card); border: 1px solid var(--edge); color: var(--dim); }
-  .gnote.ok { color: var(--alloc); border-color: rgba(217, 180, 90, .45); }
-  .ghead { margin: 8px 2px 0; font: 600 11px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--plan); }
-  .gcard { background: var(--card); border: 1px solid var(--edge); border-radius: 8px; padding: 8px 12px 6px; }
-  .gcard h3 { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 4px; font: 600 13px var(--body); color: var(--ink); }
-  .gcard h3 small { font-weight: 400; color: var(--plan); }
-  .gcard.remove { border-color: rgba(224, 74, 63, .45); }
-  .grow { display: grid; grid-template-columns: 96px 1fr auto auto; gap: 10px; align-items: baseline; padding: 3px 0; border-top: 1px solid var(--other); }
+  /* Gems: the Skill set beside the Character's gems. Every mark has a drawn icon and a word,
+     never colour alone: check had, plus missing, broken link unlinked, minus remove, ring optional.
+     The ones to act on (missing, unlinked, remove) are filled chips; had and optional stay quiet. */
+  .gemsbody { flex: 1; overflow-y: auto; padding: 18px 20px 32px; }
+  .gemsbody > div { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  .gemsbar .asof { font: 500 13px var(--body); font-variant-numeric: tabular-nums; color: var(--dim); white-space: nowrap; }
+  .gemsbar .asof.old { color: var(--refund); font-weight: 600; }
+  .tally { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: 14px; color: var(--dim); }
+  .tally b { font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; margin: 0 8px 0 -2px; color: var(--ink); }
+  .gnote { margin: 0; padding: 10px 12px; border-radius: 8px; font-size: 14px; background: var(--card); border: 1px solid var(--edge); color: var(--dim); }
+  .gnote.ok { color: var(--alloc); border-color: rgba(217, 180, 90, .5); background: var(--alloc-bg); }
+  .ghead { margin: 14px 2px 0; font: 700 15px var(--display); letter-spacing: .04em; color: var(--alloc); }
+  .gcard { background: var(--card); border: 1px solid var(--edge); border-radius: 12px; padding: 10px 14px 8px; }
+  .gcard h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0 0 2px; font: 700 15.5px var(--body); color: var(--ink); }
+  .gcard h3 small { font-weight: 400; font-size: 13px; color: var(--dim); }
+  .gcard.remove { border-color: rgba(232, 87, 75, .5); }
+  .grow { display: grid; grid-template-columns: 112px 1fr auto auto; gap: 12px; align-items: center; padding: 4px 0; border-top: 1px solid var(--other); font-size: 15px; }
   .grow:first-of-type { border-top: 0; }
-  .grow .gname small { color: var(--plan); }
-  .grow .gname { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .grow > span:first-child { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
+  .grow > span:first-child .hint { font-size: 12px; padding-left: 4px; }
+  .grow .gname small { color: var(--dim); }
+  .grow .gname { display: flex; align-items: center; gap: 10px; min-width: 0; }
   /* the gem's own picture: the socketed gem's from the items import, else from the bundled table */
-  .gicon { flex: none; width: 28px; height: 28px; object-fit: contain; }
+  .gicon { flex: none; width: 30px; height: 30px; object-fit: contain; }
   .gicon.none { visibility: hidden; }
   /* click a gem's name to copy it, say for a vendor's or the stash's search */
   .gcopy { cursor: copy; border-radius: 3px; }
   .gcopy:hover { color: var(--alloc); text-decoration: underline dotted; text-underline-offset: 3px; }
   .gcopy:focus-visible { outline: 2px solid var(--alloc); outline-offset: 1px; }
-  .copied { margin-left: 6px; font: 600 10.5px var(--body); color: var(--alloc); }
+  .copied { margin-left: 6px; font: 600 12px var(--body); color: var(--alloc); }
   .grow.optional .gicon, .grow.missing .gicon { opacity: .6; }
-  .grow .lv { font: 500 11.5px var(--mono); color: var(--dim); text-align: right; min-width: 64px; }
-  .grow .lv.head { font: 600 10.5px var(--body); letter-spacing: .06em; text-transform: uppercase; color: var(--plan); }
-  .mark { font: 600 12px var(--body); white-space: nowrap; }
-  .mark i { font-style: normal; display: inline-block; width: 16px; text-align: center; }
-  .mark.had { color: var(--alloc); }
-  .mark.missing { color: var(--next); }
-  .mark.unlinked { color: #e09a4f; }
-  .mark.remove { color: var(--refund); }
-  .mark.optional { color: var(--plan); }
+  .grow .lv { font: 500 13px var(--body); font-variant-numeric: tabular-nums; color: var(--dim); text-align: right; min-width: 64px; }
+  .grow .lv.head { font: 700 11.5px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--plan); }
+  .mark { display: inline-flex; align-items: center; gap: 5px; padding: 1px 9px 1px 6px; border-radius: 999px; border: 1px solid transparent;
+    font: 700 13px/1.5 var(--body); white-space: nowrap; }
+  .mark .ic { width: 14px; height: 14px; stroke-width: 2; }
+  .mark.had { color: var(--alloc); padding-left: 4px; }
+  .mark.missing { color: var(--next); background: var(--next-bg); border-color: rgba(136, 136, 255, .5); }
+  .mark.unlinked { color: var(--unlinked); background: var(--unlinked-bg); border-color: rgba(224, 154, 79, .5); }
+  .mark.remove { color: var(--refund); background: var(--refund-bg); border-color: rgba(232, 87, 75, .5); }
+  .mark.optional { color: var(--plan); font-weight: 600; padding-left: 4px; }
   .grow.optional .gname { color: var(--dim); }
-  .grow.support .gname { padding-left: 12px; }
+  .grow.support .gname { padding-left: 14px; }
 
-  /* Guide: the whole Leveling guide by act; done steps dimmed with ✓, the current one outlined,
-     any step clickable to make it current */
+  /* Guide: the whole Leveling guide by act; done steps step back behind a check, the current one
+     outlined and tinted, any step clickable to make it current */
   .guidebar .opt { margin: 0; white-space: nowrap; color: var(--dim); }
-  .guidebar select { width: auto; padding: 5px 8px; font-size: 12.5px; }
-  .guidebody { flex: 1; overflow-y: auto; padding: 0 20px 28px; }
-  .guidebody > div { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: 2px; }
-  .guidebody h2 { position: sticky; top: 0; z-index: 1; margin: 0; padding: 12px 4px 6px; background: var(--scene);
-    font: 600 13px var(--display); letter-spacing: .06em; color: var(--dim); }
-  .gstep { display: grid; grid-template-columns: 34px 1fr; gap: 0 8px; padding: 6px 8px; border: 1px solid transparent; border-radius: 6px;
-    cursor: pointer; text-align: left; background: none; color: var(--ink); font: 12.5px/1.5 var(--body); width: 100%; }
+  .guidebar select { width: auto; padding: 6px 8px; font-size: 13.5px; }
+  .guidebody { flex: 1; overflow-y: auto; padding: 0 20px 32px; }
+  .guidebody > div { max-width: 840px; margin: 0 auto; display: flex; flex-direction: column; gap: 2px; }
+  .guidebody h2 { position: sticky; top: 0; z-index: 1; margin: 0; padding: 18px 6px 8px; background: var(--scene);
+    font: 700 17px var(--display); letter-spacing: .05em; color: var(--alloc); border-bottom: 1px solid var(--edge); margin-bottom: 4px; }
+  .gstep { display: grid; grid-template-columns: 34px 1fr; gap: 0 10px; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px;
+    cursor: pointer; text-align: left; background: none; color: var(--ink); font: 15px/1.5 var(--body); width: 100%; }
   .gstep:hover { border-color: var(--edge); background: var(--card); }
   .gstep:focus-visible { outline: 2px solid var(--alloc); outline-offset: 1px; }
-  .gstep .n { font: 500 11px/1.9 var(--mono); color: var(--plan); text-align: right; }
-  .gstep.done { color: var(--dim); }
+  .gstep .n { display: flex; justify-content: flex-end; font: 600 13px/1.6 var(--body); font-variant-numeric: tabular-nums; color: var(--plan); }
+  .gstep .n .ic { margin-top: .2em; }
+  .gstep.done { color: var(--plan); }
   .gstep.done .n { color: var(--alloc); }
-  .gstep.cur { border-color: var(--next); background: rgba(136, 136, 255, .07); }
-  .gstep.cur .n { color: var(--next); font-weight: 700; }
-  .gstep .ln + .ln { margin-top: 1px; }
-  .gstep .sub { padding-left: 14px; font-size: 11.5px; color: var(--dim); }
+  .gstep.done .g-gem { opacity: .7; }
+  .gstep.cur { border-color: var(--next); background: var(--next-bg); box-shadow: 0 4px 18px rgba(0, 0, 0, .35); }
+  .gstep.cur .n { color: var(--next); font-weight: 700; font-size: 15px; }
+  .gstep .ln + .ln { margin-top: 2px; }
+  .gstep .sub { padding-left: 18px; font-size: 14px; color: var(--dim); }
   .gstep.done .g-kill, .gstep.done .g-enter, .gstep.done .g-quest { color: inherit; }
-  .gdone { margin: 14px 4px; padding: 8px 10px; border-radius: 6px; background: var(--card); border: 1px solid rgba(217, 180, 90, .45); color: var(--alloc); }
-  .credit { margin: 18px 4px 0; font-size: 11.5px; color: var(--plan); }
+  .gdone { margin: 14px 4px; padding: 10px 12px; border-radius: 8px; background: var(--alloc-bg); border: 1px solid rgba(217, 180, 90, .5); color: var(--alloc); font-weight: 600; }
+  .credit { margin: 22px 6px 0; font-size: 13.5px; color: var(--plan); max-width: 75ch; }
 
   /* Items: the Item set as checklist rows, one per slot (or jewel), the first mods inline and a
      Trade button; a click opens all its mods. Rarity colours follow the game's own item text. */
-  .itemsbody { flex: 1; overflow-y: auto; padding: 14px 20px 28px; }
-  .itemsbody > div { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
-  .igroup { border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; background: var(--card); }
-  .igroup > h2 { margin: 0; padding: 6px 12px; background: var(--scene); font: 600 11px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  .itemsbody { flex: 1; overflow-y: auto; padding: 18px 20px 32px; }
+  .itemsbody > div { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .igroup { border: 1px solid var(--edge); border-radius: 12px; overflow: hidden; background: var(--card); }
+  .igroup > h2 { margin: 0; padding: 9px 14px; background: var(--scene2); font: 700 15px var(--display); letter-spacing: .04em; color: var(--alloc); }
   .irow { border-top: 1px solid var(--edge); }
-  .irow summary { list-style: none; display: grid; grid-template-columns: 112px minmax(0, 230px) minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 7px 12px; cursor: pointer; }
+  .irow summary { list-style: none; display: grid; grid-template-columns: 116px minmax(0, 240px) minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 9px 14px; cursor: pointer; }
   .irow summary::-webkit-details-marker { display: none; }
   .irow summary:hover, .irow[open] summary { background: var(--scene2); }
   .irow summary:focus-visible { outline: 2px solid var(--alloc); outline-offset: -2px; }
-  .irow .sn { color: var(--plan); font-size: 12px; }
+  .irow .sn { color: var(--dim); font-size: 13px; }
   .irow .it { min-width: 0; }
-  .irow .it b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .irow .it span { color: var(--dim); font-size: 12px; }
-  .irow .gist { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--imod); font-size: 12px; }
+  .irow .it b { display: block; font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .irow .it span { color: var(--dim); font-size: 13px; }
+  .irow .gist { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--imod); font-size: 14px; }
   .irow .gist i { font-style: normal; color: var(--plan); }
-  .irow .full { padding: 4px 12px 12px 136px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 24px; }
-  .irow .full h4 { margin: 0 0 2px; font: 600 10px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--plan); }
+  .irow .full { padding: 6px 14px 14px 144px; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px 24px; }
+  .irow .full h4 { margin: 0 0 3px; font: 700 11.5px var(--body); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
   .imods { list-style: none; margin: 0; padding: 0; }
-  .imods li { color: var(--imod); }
+  .imods li { color: var(--imod); padding: 1px 0; cursor: default; }
+  .imods li:hover { background: none; }
   .imods li.k-crafted, .imods li.k-enchant { color: var(--icraft); }
   .imods li.k-fractured { color: var(--ifrac); }
-  .imods li small { color: var(--plan); font-size: 11px; }
+  .imods li small { color: var(--plan); font-size: 12px; }
   .imods li.off { color: var(--dim); }
-  .iflag { color: var(--refund); font-size: 12px; }
+  .iflag { color: var(--refund); font-size: 13px; }
   .iflag.infl { color: var(--dim); }
   /* the guide author's advice, kept apart from the mods: plain prose, not item text */
-  .inotes { margin: 0; padding: 6px 10px; border-left: 2px solid var(--faint); background: var(--scene); border-radius: 0 6px 6px 0; }
-  .inotes p { margin: 0; color: var(--ink); font-size: 12px; line-height: 1.45; }
+  .inotes { margin: 0; padding: 8px 12px; border: 1px solid var(--edge); background: var(--scene); border-radius: 8px; }
+  .inotes p { margin: 0; color: var(--ink); font-size: 13.5px; line-height: 1.45; }
   .inotes p + p { margin-top: 4px; }
-  .hasnotes { margin-left: 6px; padding: 0 5px; border: 1px solid var(--edge); border-radius: 4px; font-size: 10.5px; color: var(--dim); font-weight: 400; vertical-align: 1px; }
+  .hasnotes { margin-left: 8px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; font-size: 11.5px; color: var(--dim); font-weight: 600; vertical-align: 2px; }
   .r-normal { color: var(--inormal); } .r-magic { color: var(--next); } .r-rare { color: var(--irare); } .r-unique { color: var(--iunique); }
-  .copies { margin-left: 4px; padding: 0 5px; border: 1px solid var(--edge); border-radius: 4px; font: 500 11px var(--mono); color: var(--alloc); }
-  .trade { padding: 4px 10px; font-size: 12px; white-space: nowrap; }
+  .copies { margin-left: 6px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; font: 600 12px var(--body); font-variant-numeric: tabular-nums; color: var(--alloc); }
+  .trade { padding: 5px 12px; font-size: 13px; white-space: nowrap; }
   .trades { display: flex; gap: 6px; justify-content: flex-end; }
   /* the second choice: same search, any base of the item's kind */
-  .trade.any { border-color: var(--edge); color: var(--dim); }
+  .trade.any { border-color: var(--line); color: var(--dim); }
   .trade.any:hover { color: var(--alloc); border-color: var(--alloc); }
-  .iempty { padding: 8px 12px; border-top: 1px solid var(--edge); color: var(--plan); }
-  .inote { margin: 0; color: var(--dim); font-size: 12px; }
+  .iempty { padding: 10px 14px; border-top: 1px solid var(--edge); color: var(--dim); }
+  .inote { margin: 0; color: var(--dim); font-size: 13px; max-width: 80ch; }
   @media (max-width: 720px) {
     .irow summary { grid-template-columns: minmax(0, 1fr) auto; }
     .irow .sn, .irow .gist { display: none; }
-    .irow .full { padding-left: 12px; }
+    .irow .full { padding-left: 14px; }
   }
 
   /* Build and Settings: forms in a readable column */
-  .form { flex: 1; overflow-y: auto; padding: 22px 24px 32px; }
-  .form > div { max-width: 580px; margin: 0 auto; }
-  .form h1 { margin: 0 0 16px; font: 600 16px var(--display); letter-spacing: .05em; color: var(--alloc); }
-  fieldset { background: var(--card); border: 1px solid var(--edge); border-radius: 8px; padding: 14px; margin: 0 0 12px; min-width: 0; }
+  .form { flex: 1; overflow-y: auto; padding: 26px 24px 36px; }
+  .form > div { max-width: 600px; margin: 0 auto; }
+  .form h1 { margin: 0 0 18px; font: 700 21px var(--display); letter-spacing: .04em; color: var(--alloc); }
+  fieldset { background: var(--card); border: 1px solid var(--edge); border-radius: 12px; padding: 16px; margin: 0 0 14px; min-width: 0; }
   fieldset.off { opacity: .45; pointer-events: none; }
-  label { display: block; font-weight: 600; margin-bottom: 6px; }
-  label small { font-weight: 400; color: var(--dim); }
-  .gap { margin-top: 14px; }
+  label { display: block; font-weight: 700; font-size: 14.5px; margin-bottom: 6px; }
+  label small { font-weight: 400; font-size: 13px; color: var(--dim); }
+  .gap { margin-top: 16px; }
   textarea, input, select {
-    width: 100%; background: var(--scene); color: var(--ink); border: 1px solid var(--faint);
-    border-radius: 6px; padding: 8px; font: 12.5px var(--body);
+    width: 100%; background: var(--scene); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px 10px; font: 15px var(--body);
   }
-  .treebar select { width: auto; max-width: 340px; padding: 6px 8px; font-size: 13px; }
-  textarea { height: 64px; resize: vertical; font-family: var(--mono); font-size: 11.5px; }
-  input:focus, textarea:focus, select:focus { outline: 2px solid var(--alloc); outline-offset: -1px; }
+  input::placeholder, textarea::placeholder { color: var(--plan); }
+  input:hover, textarea:hover, select:hover { border-color: #8a785b; }
+  .treebar select { width: auto; max-width: 360px; padding: 6px 10px; font-size: 14px; }
+  textarea { height: 68px; resize: vertical; font-family: var(--mono); font-size: 12.5px; caret-color: var(--alloc); }
+  input { caret-color: var(--alloc); }
+  input:focus, textarea:focus, select:focus { outline: 2px solid var(--alloc); outline-offset: -1px; border-color: transparent; }
   .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .row input[type=number] { width: 90px; }
   .row input:not([type=number]) { flex: 1; }
-  .opt { display: flex; gap: 8px; align-items: center; font-weight: 400; margin: 8px 0 0; cursor: pointer; }
-  .opt input { width: auto; margin: 0; accent-color: var(--alloc); }
-  .indent { margin-left: 22px; }
-  .hint { color: var(--dim); font-size: 12px; margin: 6px 0 0; }
-  .hint b { color: var(--next); font-weight: 600; }
+  .opt { display: flex; gap: 8px; align-items: center; font-weight: 400; margin: 10px 0 0; cursor: pointer; }
+  .opt input { width: 16px; height: 16px; margin: 0; accent-color: var(--alloc); }
+  .indent { margin-left: 24px; }
+  .hint { color: var(--dim); font-size: 14px; margin: 6px 0 0; }
+  .hint b { color: var(--next); font-weight: 700; }
   button {
     background: var(--alloc); color: var(--scene); border: 0; border-radius: 6px; padding: 8px 16px;
-    font: 600 13px var(--body); cursor: pointer;
+    font: 700 14px var(--body); cursor: pointer;
   }
-  button:disabled { opacity: .5; cursor: default; }
+  /* the primary buttons carry no class: New loadout, Save, Got it, Update now, Go to Build */
+  button:not([class]):hover:not(:disabled) { background: #e6c46e; }
+  button:disabled { opacity: .45; cursor: default; }
   button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
-  button.ghost { background: transparent; color: var(--alloc); border: 1px solid var(--alloc); }
-  .path { flex: 1; word-break: break-all; font-family: var(--mono); font-size: 11px; margin: 0; }
-  .path.missing { color: var(--refund); font-family: var(--body); font-size: 12px; }
-  .err { color: var(--refund); min-height: 1.5em; margin: 4px 0 0; }
-  .binds { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; margin-top: 8px; }
-  .binds button { min-width: 130px; font-family: var(--mono); font-size: 12px; padding: 6px 10px; }
+  button.ghost { background: transparent; color: var(--alloc); border: 1px solid rgba(217, 180, 90, .7); }
+  button.ghost:hover { background: var(--alloc-bg); border-color: var(--alloc); }
+  .path { flex: 1; word-break: break-all; font-family: var(--mono); font-size: 12.5px; margin: 0; color: var(--ink); }
+  .path.missing { color: var(--refund); font-family: var(--body); font-size: 13.5px; }
+  .err { color: var(--refund); min-height: 1.5em; margin: 4px 0 0; font-weight: 600; }
+  .binds { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; margin-top: 10px; }
+  .binds button { min-width: 140px; font: 600 13.5px var(--body); padding: 6px 10px; }
   .binds button.rec { background: var(--next); color: var(--scene); border-color: var(--next); }
   .actions { display: flex; justify-content: flex-end; gap: 8px; align-items: center; }
   .actions .err { flex: 1; margin: 0; }
-  .saved { color: var(--plan); font-size: 12px; }
+  .saved { color: var(--ok); font-size: 13px; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -396,6 +406,7 @@
 <script src="minitree.js"></script>
 <script src="keys.js"></script>
 <script src="gem-icons.js"></script>
+<script src="icons.js"></script>
 <script src="guide-parts.js"></script>
 <script>
   const { invoke } = window.__TAURI__.core
@@ -486,7 +497,7 @@
       let n = 0
       const items = data.points.map(p => {
         const kind = p.taken ? 'taken' : (++n <= v.next.length ? 'next' : 'later')
-        return `<li class="${kind}" data-id="${p.id}"><b>${p.taken ? '✓' : n}</b><span>${esc(p.name)}</span></li>`
+        return `<li class="${kind}" data-id="${p.id}"><b>${p.taken ? Icons.icon('check') : n}</b><span>${esc(p.name)}</span></li>`
       }).join('')
       // the Refunds as drawn on the tree, so clicking one finds it like any point
       const refunded = v.nodes.filter(x => x.s === 'refund').sort((a, b) => a.n.localeCompare(b.n))
@@ -496,7 +507,7 @@
       // the Ascendancy's points, numbered on their own
       const a = v.asc
       let m = 0
-      const ascItems = a ? data.asc_points.map(p => `<li class="${p.taken ? 'taken' : 'next'}" data-id="${p.id}"><b>${p.taken ? '✓' : ++m}</b><span>${esc(p.name)}</span></li>`).join('') : ''
+      const ascItems = a ? data.asc_points.map(p => `<li class="${p.taken ? 'taken' : 'next'}" data-id="${p.id}"><b>${p.taken ? Icons.icon('check') : ++m}</b><span>${esc(p.name)}</span></li>`).join('') : ''
       const ascList = a ? `<h2>${esc(a.name)} (${a.done} taken, ${a.total - a.done} to go)</h2><ol>${ascItems}</ol>` : ''
       const notices = (v.pending_note ? `<p class="note pending">${MiniTree.swatch('pending')}<span>Pending refund: ${esc(v.pending_note)}</span></p>` : '')
         + v.notices.map(t => `<p class="note">${esc(t)}</p>`).join('')
@@ -540,10 +551,10 @@
   // ---- Gems ----
   let gems = null
   const marks = {
-    had: ['✓', 'Had'], missing: ['+', 'Missing'], unlinked: ['⛓', 'Unlinked'],
-    remove: ['−', 'Remove'], optional: ['○', 'Optional'],
+    had: ['check', 'Had'], missing: ['plus', 'Missing'], unlinked: ['unlink', 'Unlinked'],
+    remove: ['minus', 'Remove'], optional: ['ring', 'Optional'],
   }
-  const mark = st => `<span class="mark ${st}"><i aria-hidden="true">${marks[st][0]}</i>${marks[st][1]}</span>`
+  const mark = st => `<span class="mark ${st}">${Icons.icon(marks[st][0])}${marks[st][1]}</span>`
   const lq = (l, q) => l == null ? '—' : `${l}/${q}`
   // the socketed gem's own picture, else GGG's picture for the gem's name (transfigured gems show their base's)
   const gemKey = n => n.trim().toLowerCase().replace(/ support$/, '')
@@ -594,12 +605,12 @@
     }
     const how = v.chosen === 'paired' ? `goes with ${v.spec}` : v.chosen === 'active' ? `no Skill set pairs with ${v.spec}: the build's own` : 'picked by you'
     const options = v.skill_sets.map((t, i) => `<option value="${i}"${i === v.skill_set ? ' selected' : ''}>${esc(t)}</option>`).join('')
-    const follow = v.chosen === 'picked' ? '<button class="ghost" id="followSpec" style="padding:5px 10px;font-size:12px">Follow Tree spec</button>' : ''
+    const follow = v.chosen === 'picked' ? '<button class="ghost" id="followSpec" style="padding:6px 12px;font-size:13px">Follow Tree spec</button>' : ''
     const asof = v.busy ? 'Importing gems…' : v.as_of ? `Gems as of ${ago(v.as_of)}` : ''
     const old = v.as_of && Date.now() / 1000 - v.as_of > 600
     const top = `<div class="treebar gemsbar">
       ${v.character ? `<span class="who">${esc(v.character)}</span>` : ''}
-      ${v.skill_sets.length ? `<select id="skillSet" aria-label="Skill set">${options}</select><span class="who" style="font-size:12px">${esc(how)}</span>` : ''}
+      ${v.skill_sets.length ? `<select id="skillSet" aria-label="Skill set">${options}</select><span class="who how">${esc(how)}</span>` : ''}
       ${follow}<span style="flex:1"></span><span class="asof${old ? ' old' : ''}" title="Gems come from your pathofexile.com profile">${asof}</span></div>`
     const c = v.comparison
     const groups = c ? c.groups : v.groups
@@ -679,10 +690,10 @@
     }
     const how = v.chosen === 'paired' ? `goes with ${v.spec}` : v.chosen === 'active' ? `no Item set pairs with ${v.spec}: the build's own` : 'picked by you'
     const options = v.item_sets.map((t, i) => `<option value="${i}"${i === v.item_set ? ' selected' : ''}>${esc(t)}</option>`).join('')
-    const follow = v.chosen === 'picked' ? '<button class="ghost" id="followSpecItems" style="padding:5px 10px;font-size:12px">Follow Tree spec</button>' : ''
+    const follow = v.chosen === 'picked' ? '<button class="ghost" id="followSpecItems" style="padding:6px 12px;font-size:13px">Follow Tree spec</button>' : ''
     const top = `<div class="treebar">
-      ${v.item_sets.length ? `<select id="itemSet" aria-label="Item set">${options}</select><span class="who" style="font-size:12px">${esc(how)}</span>` : ''}
-      ${follow}<span style="flex:1"></span><span class="who" style="font-size:12px" title="Trade links search this league">${v.league ? `Trade in ${esc(v.league)}` : ''}</span></div>`
+      ${v.item_sets.length ? `<select id="itemSet" aria-label="Item set">${options}</select><span class="who how">${esc(how)}</span>` : ''}
+      ${follow}<span style="flex:1"></span><span class="who how" title="Trade links search this league">${v.league ? `Trade in ${esc(v.league)}` : ''}</span></div>`
     const g = v.groups
     const group = (title, rows, none) => `<div class="igroup"><h2>${title}</h2>${rows.length ? rows.map(irow).join('') : `<div class="iempty">${none}</div>`}</div>`
     const parts = []
@@ -732,7 +743,7 @@
       if (s.act !== act) { act = s.act; rows.push(`<h2>Act ${act}</h2>`) }
       const state = i < v.step ? 'done' : i === v.step ? 'cur' : ''
       const lines = s.lines.map(l => `<div class="ln">${GuideParts.line(l.parts)}${l.subs.map(x => `<div class="sub">${GuideParts.line(x)}</div>`).join('')}${GuideParts.gems(l.gems)}</div>`).join('')
-      rows.push(`<button class="gstep ${state}" data-step="${i}"${state === 'cur' ? ' aria-current="step"' : ''} title="${state === 'cur' ? 'The current step' : 'Make this the current step'}"><span class="n">${state === 'done' ? '✓' : i + 1}</span><span>${lines}</span></button>`)
+      rows.push(`<button class="gstep ${state}" data-step="${i}"${state === 'cur' ? ' aria-current="step"' : ''} title="${state === 'cur' ? 'The current step' : 'Make this the current step'}"><span class="n">${state === 'done' ? Icons.icon('check') : i + 1}</span><span>${lines}</span></button>`)
     }
     if (v.step >= total) rows.push('<p class="gdone">Campaign done: Acts 1–10.</p>')
     const credit = `<p class="credit">Route from exile-leveling by HeartofPhos (MIT), with quest data from poewiki. Entering each step's last area moves the guide on; click a step to move it by hand. ${v.gems ? '★ Take and $ Buy are the Build’s gems (✓ already socketed); click a gem name to copy it.' : 'Load a Build to see which gems to take and buy.'}</p>`
@@ -1143,8 +1154,13 @@
 
   // ---- load ----
   const loadTree = () => invoke('build_view').then(d => { data = d; renderTree(); banners() })
-  // any change to the plan (a tick, a re-sync, a new spec, new settings) reloads what shows it
-  listen('plan', () => { loadTree(); loadSetup(false); if (current === 'gems') loadGems(); if (current === 'guide') loadGuide(false) })
+  // any change to the plan (a tick, a re-sync, a new spec, new settings) reloads what shows it;
+  // the gems and guide have events of their own. While the window is hidden (closed to the
+  // tray, playing) the reload waits until it shows again.
+  let planStale = false
+  const reloadPlan = () => { loadTree(); loadSetup(false) }
+  listen('plan', () => { if (document.hidden) planStale = true; else reloadPlan() })
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && planStale) { planStale = false; reloadPlan() } })
   listen('binds', e => { binds = e.payload; showBinds() })
   listen('status', e => { if (e.payload.permission !== permission) { permission = e.payload.permission; banners() } })
 

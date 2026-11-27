@@ -303,13 +303,27 @@ pub fn load(path: &PathBuf) -> Saved {
     })
 }
 
+/// Writes the state, compact: it holds a copy of every Loadout's build, and it's saved on
+/// every point, level and Guide step. Skips the write when nothing changed since the last one.
 pub fn save(path: &PathBuf, saved: &Saved) -> Result<(), String> {
+    use std::hash::{Hash, Hasher};
+    static LAST: std::sync::Mutex<Option<(PathBuf, u64)>> = std::sync::Mutex::new(None);
+    let text = serde_json::to_string(saved).map_err(|e| e.to_string())?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    let written = (path.clone(), h.finish());
+    let mut last = LAST.lock().unwrap();
+    if last.as_ref() == Some(&written) && path.is_file() {
+        return Ok(());
+    }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(saved).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
-    std::fs::rename(tmp, path).map_err(|e| e.to_string())
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(tmp, path).map_err(|e| e.to_string())?;
+    *last = Some(written);
+    Ok(())
 }
 
 #[cfg(test)]

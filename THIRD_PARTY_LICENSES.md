@@ -70,3 +70,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Cinzel and Source Sans 3 (fonts)
+
+The app's type is bundled in `ui/fonts/`: [Cinzel](https://github.com/NDISCOVER/Cinzel) for headings
+(Copyright 2020 The Cinzel Project Authors) and [Source Sans 3](https://github.com/adobe-fonts/source-sans)
+for everything else (Copyright 2010-2020 Adobe, with Reserved Font Name 'Source'). Both are licensed under
+the SIL Open Font License, Version 1.1; the full licence texts ship beside the fonts as
+`ui/fonts/OFL-Cinzel.txt` and `ui/fonts/OFL-SourceSans3.txt`.
